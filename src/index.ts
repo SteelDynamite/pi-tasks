@@ -16,7 +16,8 @@
 
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, formatSize, truncateHead, truncateTail } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { AutoClearManager } from "./auto-clear.js";
 import { ProcessTracker } from "./process-tracker.js";
@@ -34,8 +35,17 @@ function debug(...args: unknown[]) {
 
 // ---- Helpers ----
 
-function textResult(msg: string) {
-  return { content: [{ type: "text" as const, text: msg }], details: undefined as any };
+type TruncateMode = "head" | "tail";
+
+function truncateForTool(msg: string, mode: TruncateMode = "head"): string {
+  const truncation = mode === "tail" ? truncateTail(msg) : truncateHead(msg);
+  if (!truncation.truncated) return msg;
+  const notice = `[Output truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}).]`;
+  return truncation.content ? `${truncation.content}\n\n${notice}` : notice;
+}
+
+function textResult(msg: string, mode: TruncateMode = "head") {
+  return { content: [{ type: "text" as const, text: truncateForTool(msg, mode) }], details: undefined as any };
 }
 
 /** Task tool names — used to detect task tool usage for reminder suppression. */
@@ -357,16 +367,14 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // session_switch fires on /new (reason: "new") and /resume (reason: "resume").
-  // On /new: reset all session-scoped state so the store switches to the new session file.
-  // On resume: reload persisted tasks from the existing session file.
-  pi.on("session_switch" as any, async (event: any, ctx: ExtensionContext) => {
+  // On /new, /resume, or /fork the extension runtime is recreated. Reset
+  // session-scoped in-memory state in session_start for the new runtime.
+  pi.on("session_start", async (event, ctx) => {
     latestCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
 
-    const isResume = event?.reason === "resume";
+    const isResume = event.reason === "resume";
 
-    // Reset session-scoped state for both /new and /resume
     storeUpgraded = false;
     persistedTasksShown = false;
     currentTurn = 0;
@@ -374,13 +382,16 @@ export default function (pi: ExtensionAPI) {
     reminderInjectedThisCycle = false;
     autoClear.reset();
 
-    // Memory mode has no file-backed store to switch — clear explicitly on /new
     if (!isResume && taskScope === "memory") {
       store.clearAll();
     }
 
     upgradeStoreIfNeeded(ctx);
     showPersistedTasks(isResume);
+  });
+
+  pi.on("session_shutdown", async () => {
+    widget.dispose();
   });
 
   // Keep latestCtx fresh on every tool execution as well.
@@ -686,9 +697,7 @@ Set up task dependencies:
 \`\`\``,
     parameters: Type.Object({
       taskId: Type.String({ description: "The ID of the task to update" }),
-      status: Type.Optional(Type.Unsafe<"pending" | "in_progress" | "completed" | "deleted">({
-        type: "string",
-        enum: ["pending", "in_progress", "completed", "deleted"],
+      status: Type.Optional(StringEnum(["pending", "in_progress", "completed", "deleted"] as const, {
         description: "New status for the task",
       })),
       subject: Type.Optional(Type.String({ description: "New subject for the task" })),
@@ -794,12 +803,14 @@ Set up task dependencies:
         if (result) {
           return textResult(
             `Task #${task_id} (${result.status})${result.exitCode !== undefined ? ` exit code: ${result.exitCode}` : ""}\n\n${result.output}`,
+            "tail",
           );
         }
       }
 
       return textResult(
         `Task #${task_id} (${processOutput.status})${processOutput.exitCode !== undefined ? ` exit code: ${processOutput.exitCode}` : ""}\n\n${processOutput.output}`,
+        "tail",
       );
     },
   });

@@ -6,6 +6,7 @@
  */
 
 import type { ChildProcess } from "node:child_process";
+import { DEFAULT_MAX_BYTES, truncateTail } from "@earendil-works/pi-coding-agent";
 import type { BackgroundProcess } from "./types.js";
 
 export interface ProcessOutput {
@@ -16,6 +17,8 @@ export interface ProcessOutput {
   completedAt?: number;
   command?: string;
 }
+
+const MAX_BUFFER_BYTES = DEFAULT_MAX_BYTES * 2;
 
 export class ProcessTracker {
   private processes = new Map<string, BackgroundProcess>();
@@ -34,14 +37,27 @@ export class ProcessTracker {
       waiters: [],
     };
 
+    let outputBytes = 0;
+    const appendOutput = (raw: string) => {
+      const chunk = Buffer.byteLength(raw, "utf8") > MAX_BUFFER_BYTES
+        ? truncateTail(raw, { maxBytes: MAX_BUFFER_BYTES, maxLines: Number.MAX_SAFE_INTEGER }).content
+        : raw;
+      bp.output.push(chunk);
+      outputBytes += Buffer.byteLength(chunk, "utf8");
+      while (outputBytes > MAX_BUFFER_BYTES && bp.output.length > 1) {
+        const removed = bp.output.shift()!;
+        outputBytes -= Buffer.byteLength(removed, "utf8");
+      }
+    };
+
     // Buffer stdout
     proc.stdout?.on("data", (data: Buffer) => {
-      bp.output.push(data.toString());
+      appendOutput(data.toString());
     });
 
     // Buffer stderr
     proc.stderr?.on("data", (data: Buffer) => {
-      bp.output.push(data.toString());
+      appendOutput(data.toString());
     });
 
     // Handle process exit
@@ -59,7 +75,7 @@ export class ProcessTracker {
     proc.on("error", (err) => {
       if (bp.status === "running") {
         bp.status = "error";
-        bp.output.push(`Process error: ${err.message}`);
+        appendOutput(`Process error: ${err.message}`);
         bp.completedAt = Date.now();
         for (const resolve of bp.waiters) resolve();
         bp.waiters = [];
