@@ -73,13 +73,13 @@ describe("auto-clear: on_task_complete mode", () => {
   it("cleans up dependency edges when auto-clearing", () => {
     store.create("Blocker", "Desc");
     store.create("Blocked", "Desc");
-    store.update("1", { addBlocks: ["2"] });
+    store.update("1", { addDependents: ["2"] });
     store.update("1", { status: "completed" });
     manager.trackCompletion("1", 1);
 
     manager.onTurnStart(5);
     expect(store.get("1")).toBeUndefined();
-    expect(store.get("2")!.blockedBy).toEqual([]);
+    expect(store.get("2")!.dependsOn).toEqual([]);
   });
 
   it("returns true when tasks are cleared", () => {

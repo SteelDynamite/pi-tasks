@@ -2,11 +2,12 @@
  * task-widget.ts — Persistent widget showing task list with status icons and progress.
  *
  * Display style matches Claude Code's task list:
- *   ✔ completed tasks (strikethrough + dim)
- *   ◼ in_progress tasks
+ *   ○ pending tasks
+ *   ▶ in_progress tasks, animated as ▹/▸/▶ while active
  *   ■ stopped tasks
- *   ◻ pending tasks
- *   ✳/✽ actively executing task (star spinner with activeForm text)
+ *   ✓ completed tasks (strikethrough + dim)
+ *   ✗ failed tasks
+ *   ⊘ blocked tasks (waiting on user action)
  */
 
 import { truncateToWidth } from "@earendil-works/pi-tui";
@@ -29,9 +30,7 @@ export type UICtx = {
   ): void;
 };
 
-/** Star spinner frames for animated active task indicator (matches Claude Code). */
-const SPINNER = ["✳", "✴", "✵", "✶", "✷", "✸", "✹", "✺", "✻", "✼", "✽"];
-
+const IN_PROGRESS_FRAMES = ["▹", "▸", "▶", "▸"];
 const MAX_VISIBLE_TASKS = 10;
 
 /** Per-task runtime metrics (elapsed time, token usage). */
@@ -65,7 +64,7 @@ export class TaskWidget {
   private uiCtx: UICtx | undefined;
   private widgetFrame = 0;
   private widgetInterval: ReturnType<typeof setInterval> | undefined;
-  /** IDs of tasks currently being actively executed (show spinner). */
+  /** IDs of tasks currently being actively executed (show activeForm and runtime stats). */
   private activeTaskIds = new Set<string>();
   /** Per-task runtime metrics keyed by task ID. */
   private metrics = new Map<string, TaskMetrics>();
@@ -84,7 +83,7 @@ export class TaskWidget {
     this.uiCtx = ctx;
   }
 
-  /** Clear runtime-only active spinner state. */
+  /** Clear runtime-only active task state. */
   clearActiveTasks() {
     this.activeTaskIds.clear();
     this.metrics.clear();
@@ -94,7 +93,7 @@ export class TaskWidget {
     }
   }
 
-  /** Add or remove a task from the active spinner set. */
+  /** Add or remove a task from the active set. */
   setActiveTask(taskId: string | undefined, active = true) {
     if (taskId && active) {
       this.activeTaskIds.add(taskId);
@@ -137,17 +136,20 @@ export class TaskWidget {
 
     const completed = tasks.filter(t => t.status === "completed");
     const inProgress = tasks.filter(t => t.status === "in_progress");
+    const blocked = tasks.filter(t => t.status === "blocked");
     const stopped = tasks.filter(t => t.status === "stopped");
+    const failed = tasks.filter(t => t.status === "failed");
     const pending = tasks.filter(t => t.status === "pending");
 
     const parts: string[] = [];
     if (completed.length > 0) parts.push(`${completed.length} done`);
     if (inProgress.length > 0) parts.push(`${inProgress.length} in progress`);
+    if (blocked.length > 0) parts.push(`${blocked.length} blocked`);
     if (stopped.length > 0) parts.push(`${stopped.length} stopped`);
-    if (pending.length > 0) parts.push(`${pending.length} open`);
+    if (failed.length > 0) parts.push(`${failed.length} failed`);
+    if (pending.length > 0) parts.push(`${pending.length} pending`);
     const statusText = `${tasks.length} tasks (${parts.join(", ")})`;
 
-    const spinnerChar = SPINNER[this.widgetFrame % SPINNER.length];
     const lines: string[] = [truncate(theme.fg("accent", "●") + " " + theme.fg("accent", statusText))];
 
     const visible = tasks.slice(0, MAX_VISIBLE_TASKS);
@@ -156,26 +158,29 @@ export class TaskWidget {
       const isActive = this.activeTaskIds.has(task.id) && task.status === "in_progress";
 
       let icon: string;
-      if (isActive) {
-        icon = theme.fg("accent", spinnerChar);
-      } else if (task.status === "completed") {
-        icon = theme.fg("success", "✔");
+      if (task.status === "completed") {
+        icon = theme.fg("success", "✓");
       } else if (task.status === "in_progress") {
-        icon = theme.fg("accent", "◼");
+        const frame = isActive ? IN_PROGRESS_FRAMES[this.widgetFrame % IN_PROGRESS_FRAMES.length] : "▶";
+        icon = theme.fg("accent", frame);
+      } else if (task.status === "blocked") {
+        icon = theme.fg("warning", "⊘");
       } else if (task.status === "stopped") {
         icon = theme.fg("error", "■");
+      } else if (task.status === "failed") {
+        icon = theme.fg("error", "✗");
       } else {
-        icon = "◻";
+        icon = "○";
       }
 
       let suffix = "";
-      if (task.status === "pending" && task.blockedBy.length > 0) {
-        const openBlockers = task.blockedBy.filter(bid => {
-          const blocker = this.store.get(bid);
-          return blocker && blocker.status !== "completed";
+      if (task.dependsOn.length > 0) {
+        const openDeps = task.dependsOn.filter(depId => {
+          const dep = this.store.get(depId);
+          return dep && dep.status !== "completed";
         });
-        if (openBlockers.length > 0) {
-          suffix = theme.fg("dim", ` › blocked by ${openBlockers.map(id => "#" + id).join(", ")}`);
+        if (openDeps.length > 0) {
+          suffix = theme.fg("dim", ` › depends on ${openDeps.map(id => "#" + id).join(", ")}`);
         }
       }
 
@@ -242,16 +247,16 @@ export class TaskWidget {
       }
     }
 
-    // Check if any task needs animation
-    const hasActiveSpinner = tasks.some(t => this.activeTaskIds.has(t.id) && t.status === "in_progress");
-    if (hasActiveSpinner) {
+    // Check if any task needs runtime stat refresh
+    const hasActiveTask = tasks.some(t => this.activeTaskIds.has(t.id) && t.status === "in_progress");
+    if (hasActiveTask) {
       this.ensureTimer();
-    } else if (!hasActiveSpinner && this.widgetInterval) {
+    } else if (!hasActiveTask && this.widgetInterval) {
       clearInterval(this.widgetInterval);
       this.widgetInterval = undefined;
     }
 
-    this.widgetFrame++;
+    if (hasActiveTask) this.widgetFrame++;
 
     // Transition: hidden → visible — register widget callback once
     if (!this.widgetRegistered) {

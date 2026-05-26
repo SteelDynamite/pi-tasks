@@ -67,25 +67,25 @@ describe("TaskWidget", () => {
     expect(entry?.content).toBeUndefined();
   });
 
-  it("renders pending tasks with ◻ icon", () => {
+  it("renders pending tasks with ○ icon", () => {
     store.create("Do something", "Desc");
     widget.update();
 
     const lines = renderWidget(ui.state);
     expect(lines).toHaveLength(2); // header + 1 task
     expect(lines[0]).toContain("1 tasks");
-    expect(lines[0]).toContain("1 open");
-    expect(lines[1]).toContain("◻");
+    expect(lines[0]).toContain("1 pending");
+    expect(lines[1]).toContain("○");
     expect(lines[1]).toContain("Do something");
   });
 
-  it("renders in-progress tasks with ◼ icon", () => {
+  it("renders in-progress tasks with ▶ icon", () => {
     store.create("Working on it", "Desc");
     store.update("1", { status: "in_progress" });
     widget.update();
 
     const lines = renderWidget(ui.state);
-    expect(lines[1]).toContain("◼");
+    expect(lines[1]).toContain("▶");
     expect(lines[1]).toContain("Working on it");
   });
 
@@ -100,49 +100,71 @@ describe("TaskWidget", () => {
     expect(lines[1]).toContain("Stopped task");
   });
 
-  it("renders completed tasks with ✔ icon and strikethrough", () => {
+  it("renders blocked tasks with ⊘ icon", () => {
+    store.create("Blocked task", "Desc");
+    store.update("1", { status: "blocked" });
+    widget.update();
+
+    const lines = renderWidget(ui.state);
+    expect(lines[0]).toContain("1 blocked");
+    expect(lines[1]).toContain("⊘");
+  });
+
+  it("renders failed tasks with ✗ icon", () => {
+    store.create("Failed task", "Desc");
+    store.update("1", { status: "failed" });
+    widget.update();
+
+    const lines = renderWidget(ui.state);
+    expect(lines[0]).toContain("1 failed");
+    expect(lines[1]).toContain("✗");
+  });
+
+  it("renders completed tasks with ✓ icon and strikethrough", () => {
     store.create("Done task", "Desc");
     store.update("1", { status: "completed" });
     widget.update();
 
     const lines = renderWidget(ui.state);
-    expect(lines[1]).toContain("✔");
+    expect(lines[1]).toContain("✓");
     expect(lines[1]).toContain("~~#1 Done task~~");
   });
 
-  it("renders active tasks with spinner icon", () => {
+  it("renders active tasks with play-shaped animation", () => {
     store.create("Running thing", "Desc", "Processing data");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
-    const lines = renderWidget(ui.state);
-    // Should show activeForm text with "…" suffix
+    let lines = renderWidget(ui.state);
+    expect(lines[1]).toContain("▸");
     expect(lines[1]).toContain("Processing data…");
-    // Should NOT show ◼ for active task
-    expect(lines[1]).not.toContain("◼");
+
+    vi.advanceTimersByTime(150);
+    lines = renderWidget(ui.state);
+    expect(lines[1]).toContain("▶");
   });
 
-  it("shows blocked-by info for pending tasks", () => {
+  it("shows dependency info for pending tasks", () => {
     store.create("Blocker", "Desc");
     store.create("Blocked", "Desc");
-    store.update("2", { addBlockedBy: ["1"] });
+    store.update("2", { addDependsOn: ["1"] });
     widget.update();
 
     const lines = renderWidget(ui.state);
     const blockedLine = lines.find(l => l.includes("Blocked"));
-    expect(blockedLine).toContain("blocked by #1");
+    expect(blockedLine).toContain("depends on #1");
   });
 
-  it("hides completed blockers in blocked-by suffix", () => {
+  it("hides completed dependencies in dependency suffix", () => {
     store.create("Blocker", "Desc");
     store.create("Blocked", "Desc");
-    store.update("2", { addBlockedBy: ["1"] });
+    store.update("2", { addDependsOn: ["1"] });
     store.update("1", { status: "completed" });
     widget.update();
 
     const lines = renderWidget(ui.state);
     const blockedLine = lines.find(l => l.includes("Blocked"));
-    expect(blockedLine).not.toContain("blocked by");
+    expect(blockedLine).not.toContain("depends on");
   });
 
   it("shows status summary in header", () => {
@@ -157,7 +179,7 @@ describe("TaskWidget", () => {
     expect(lines[0]).toContain("3 tasks");
     expect(lines[0]).toContain("1 done");
     expect(lines[0]).toContain("1 in progress");
-    expect(lines[0]).toContain("1 open");
+    expect(lines[0]).toContain("1 pending");
   });
 
   it("clears widget when all tasks are deleted", () => {
@@ -201,14 +223,13 @@ describe("TaskWidget", () => {
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
-    // Should be active (spinner)
     let lines = renderWidget(ui.state);
     expect(lines[1]).toContain("Doing work…");
 
     widget.setActiveTask("1", false);
     lines = renderWidget(ui.state);
-    // Should now show as regular in_progress (◼)
-    expect(lines[1]).toContain("◼");
+    // Should now show as regular in_progress (▶)
+    expect(lines[1]).toContain("▶");
     expect(lines[1]).not.toContain("Doing work…");
   });
 
@@ -223,7 +244,7 @@ describe("TaskWidget", () => {
 
     // Should render as completed, not active
     const lines = renderWidget(ui.state);
-    expect(lines[1]).toContain("✔");
+    expect(lines[1]).toContain("✓");
     expect(lines[1]).toContain("~~#1 Task~~");
   });
 

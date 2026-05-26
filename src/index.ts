@@ -293,15 +293,15 @@ export default function (pi: ExtensionAPI) {
    *  Injects completed dependency results so cascaded agents have context from prerequisites.
    */
   function buildTaskPrompt(
-    task: { id: string; subject: string; description: string; blockedBy?: string[] },
+    task: { id: string; subject: string; description: string; dependsOn?: string[] },
     additionalContext?: string,
   ): string {
     let prompt = `You are executing task #${task.id}: "${task.subject}"\n\n${task.description}`;
 
     // Inject completed dependency results so cascaded agents have full context
-    if (task.blockedBy && task.blockedBy.length > 0) {
+    if (task.dependsOn && task.dependsOn.length > 0) {
       const depResults: string[] = [];
-      for (const depId of task.blockedBy) {
+      for (const depId of task.dependsOn) {
         const dep = store.get(depId);
         if (dep?.metadata?.result) {
           const result = dep.metadata.result.length > 4000
@@ -359,15 +359,15 @@ export default function (pi: ExtensionAPI) {
     updateTask(task.id, { status: "completed", metadata: { ...task.metadata, result } });
     widget.setActiveTask(task.id, false);
 
-    // Auto-cascade: find unblocked dependents with agentType
+    // Auto-cascade: find eligible dependents with agentType
     if ((cfg.autoCascade ?? false) && cascadeConfig && latestCtx) {
-      const unblocked = store.list().filter(t =>
+      const eligible = store.list().filter(t =>
         t.status === "pending" &&
         t.metadata?.agentType &&
-        t.blockedBy.includes(task.id) &&
-        t.blockedBy.every(depId => store.get(depId)?.status === "completed")
+        t.dependsOn.includes(task.id) &&
+        t.dependsOn.every(depId => store.get(depId)?.status === "completed")
       );
-      for (const next of unblocked) {
+      for (const next of eligible) {
         updateTask(next.id, { status: "in_progress" });
         const prompt = buildTaskPrompt(next, cascadeConfig.additionalContext);
         try {
@@ -381,7 +381,7 @@ export default function (pi: ExtensionAPI) {
           updateTask(next.id, { owner: agentId, metadata: { ...next.metadata, agentId } });
           widget.setActiveTask(next.id);
         } catch (err: any) {
-          updateTask(next.id, { status: "pending", metadata: { ...next.metadata, lastError: err.message } });
+          updateTask(next.id, { status: "failed", metadata: { ...next.metadata, lastError: err.message } });
         }
       }
     }
@@ -389,8 +389,7 @@ export default function (pi: ExtensionAPI) {
     widget.update();
   });
 
-  // Failure → store error, revert to pending, don't cascade (branch stops)
-  // Intentional stop (status === "stopped") → mark stopped, preserve partial result
+  // Failure → store error and mark failed; intentional stop preserves partial result.
   pi.events.on("subagents:failed", (data) => {
     const { id, error, result, status } = data as { id: string; error?: string; result?: string; status: string };
     const taskId = resolveTaskIdForAgent(id);
@@ -404,8 +403,8 @@ export default function (pi: ExtensionAPI) {
       markTaskStopped(task.id, "subagent_stopped");
       if (result) updateTask(task.id, { metadata: { ...task.metadata, result } });
     } else {
-      // Actual error — revert to pending
-      updateTask(task.id, { status: "pending", metadata: { ...task.metadata, lastError: error || status } });
+      // Actual error — mark failed
+      updateTask(task.id, { status: "failed", metadata: { ...task.metadata, lastError: error || status } });
       autoClear.resetBatchCountdown();
     }
     widget.setActiveTask(task.id, false);
@@ -598,7 +597,7 @@ NOTE that you should not use this tool if there is only one trivial task to do. 
 
 - **subject**: A brief, actionable title in imperative form (e.g., "Fix authentication bug in login flow")
 - **description**: Detailed description of what needs to be done, including context and acceptance criteria
-- **activeForm** (optional): Present continuous form shown in the spinner when the task is in_progress (e.g., "Fixing authentication bug"). If omitted, the spinner shows the subject instead.
+- **activeForm** (optional): Present continuous form shown while the task is in_progress (e.g., "Fixing authentication bug"). If omitted, the subject is shown.
 
 All tasks are created with status \`pending\`.
 
@@ -606,7 +605,7 @@ All tasks are created with status \`pending\`.
 
 - Create tasks with clear, specific subjects that describe the outcome
 - Include enough detail in the description for another agent to understand and complete the task
-- After creating tasks, use TaskUpdate to set up dependencies (blocks/blockedBy) if needed
+- After creating tasks, use TaskUpdate to set up dependencies (dependents/dependsOn) if needed
 - Check TaskList first to avoid creating duplicate tasks
 - Include \`agentType\` (e.g., "general-purpose", "Explore") to mark tasks for subagent execution via TaskExecute`,
     promptGuidelines: [
@@ -617,7 +616,7 @@ All tasks are created with status \`pending\`.
     parameters: Type.Object({
       subject: Type.String({ description: "A brief title for the task" }),
       description: Type.String({ description: "A detailed description of what needs to be done" }),
-      activeForm: Type.Optional(Type.String({ description: "Present continuous form shown in spinner when in_progress (e.g., 'Running tests')" })),
+      activeForm: Type.Optional(Type.String({ description: "Present continuous form shown while in_progress (e.g., 'Running tests')" })),
       agentType: Type.Optional(Type.String({ description: "Agent type for subagent execution (e.g., 'general-purpose', 'Explore'). Tasks with agentType can be started via TaskExecute." })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
     }),
@@ -643,10 +642,10 @@ All tasks are created with status \`pending\`.
 
 ## When to Use This Tool
 
-- To see what tasks are available to work on (status: 'pending', no owner, not blocked)
+- To see what tasks are available to work on (status: 'pending', no owner, dependencies complete)
 - To check overall progress on the project
-- To find tasks that are blocked and need dependencies resolved
-- After completing a task, to check for newly unblocked work or claim the next available task
+- To find tasks that are blocked waiting on user action
+- After completing a task, to check for newly eligible work or claim the next available task
 - **Prefer working on tasks in ID order** (lowest ID first) when multiple tasks are available, as earlier tasks often set up context for later ones
 
 ## Output
@@ -654,9 +653,9 @@ All tasks are created with status \`pending\`.
 Returns a summary of each task:
 - **id**: Task identifier (use with TaskGet, TaskUpdate)
 - **subject**: Brief description of the task
-- **status**: 'pending', 'in_progress', 'stopped', or 'completed'
+- **status**: 'pending', 'in_progress', 'blocked', 'stopped', 'failed', or 'completed'
 - **owner**: Agent ID if assigned, empty if available
-- **blockedBy**: List of open task IDs that must be resolved first (tasks with blockedBy cannot be claimed until dependencies resolve)
+- **dependsOn**: List of dependency task IDs that must complete first
 
 Use TaskGet with a specific task ID to view full details including description and comments.`,
     parameters: Type.Object({}),
@@ -665,8 +664,8 @@ Use TaskGet with a specific task ID to view full details including description a
       const tasks = store.list();
       if (tasks.length === 0) return Promise.resolve(textResult("No tasks found"));
 
-      // Sort: pending first (by ID), then in_progress, stopped, completed (each by ID)
-      const statusOrder: Record<string, number> = { pending: 0, in_progress: 1, stopped: 2, completed: 3 };
+      // Sort by workflow state, then ID.
+      const statusOrder: Record<string, number> = { pending: 0, in_progress: 1, blocked: 2, stopped: 3, failed: 4, completed: 5 };
       const sorted = [...tasks].sort((a, b) => {
         const so = (statusOrder[a.status] ?? 0) - (statusOrder[b.status] ?? 0);
         if (so !== 0) return so;
@@ -680,14 +679,14 @@ Use TaskGet with a specific task ID to view full details including description a
           line += ` (${task.owner})`;
         }
 
-        // Only show non-completed blockers
-        if (task.blockedBy.length > 0) {
-          const openBlockers = task.blockedBy.filter(bid => {
-            const blocker = store.get(bid);
-            return blocker && blocker.status !== "completed";
+        // Only show non-completed dependencies
+        if (task.dependsOn.length > 0) {
+          const openDependencies = task.dependsOn.filter(bid => {
+            const dependency = store.get(bid);
+            return dependency && dependency.status !== "completed";
           });
-          if (openBlockers.length > 0) {
-            line += ` [blocked by ${openBlockers.map(id => "#" + id).join(", ")}]`;
+          if (openDependencies.length > 0) {
+            line += ` [depends on ${openDependencies.map(id => "#" + id).join(", ")}]`;
           }
         }
 
@@ -710,7 +709,7 @@ Use TaskGet with a specific task ID to view full details including description a
 ## When to Use This Tool
 
 - When you need the full description and context before starting work on a task
-- To understand task dependencies (what it blocks, what blocks it)
+- To understand task dependencies (what it depends on and what depends on it)
 - After being assigned a task, to get complete requirements
 
 ## Output
@@ -718,13 +717,13 @@ Use TaskGet with a specific task ID to view full details including description a
 Returns full task details:
 - **subject**: Task title
 - **description**: Detailed requirements and context
-- **status**: 'pending', 'in_progress', 'stopped', or 'completed'
-- **blocks**: Tasks waiting on this one to complete
-- **blockedBy**: Tasks that must complete before this one can start
+- **status**: 'pending', 'in_progress', 'blocked', 'stopped', 'failed', or 'completed'
+- **dependents**: Tasks waiting on this one to complete
+- **dependsOn**: Tasks that must complete before this one can start
 
 ## Tips
 
-- After fetching a task, verify its blockedBy list is empty before beginning work.
+- After fetching a task, verify its dependsOn dependencies are complete before beginning work.
 - Use TaskList to see all tasks in summary form.`,
     parameters: Type.Object({
       taskId: Type.String({ description: "The ID of the task to retrieve" }),
@@ -746,17 +745,17 @@ Returns full task details:
       }
       lines.push(`Description: ${desc}`);
 
-      if (task.blockedBy.length > 0) {
-        const openBlockers = task.blockedBy.filter(bid => {
-          const blocker = store.get(bid);
-          return blocker && blocker.status !== "completed";
+      if (task.dependsOn.length > 0) {
+        const openDependencies = task.dependsOn.filter(bid => {
+          const dependency = store.get(bid);
+          return dependency && dependency.status !== "completed";
         });
-        if (openBlockers.length > 0) {
-          lines.push(`Blocked by: ${openBlockers.map(id => "#" + id).join(", ")}`);
+        if (openDependencies.length > 0) {
+          lines.push(`Depends on: ${openDependencies.map(id => "#" + id).join(", ")}`);
         }
       }
-      if (task.blocks.length > 0) {
-        lines.push(`Blocks: ${task.blocks.map(id => "#" + id).join(", ")}`);
+      if (task.dependents.length > 0) {
+        lines.push(`Dependents: ${task.dependents.map(id => "#" + id).join(", ")}`);
       }
 
       // Show metadata if non-empty
@@ -791,8 +790,10 @@ Returns full task details:
 - After resolving, call TaskList to find your next task
 
 - ONLY mark a task as completed when you have FULLY accomplished it
-- If you encounter errors, blockers, or cannot finish, keep the task as in_progress
-- When blocked, create a new task describing what needs to be resolved
+- If blocked waiting on the user, set status to blocked and explain what user action is needed
+- If intentionally stopped/cancelled, set status to stopped
+- If fundamentally failed and the assistant cannot recover, set status to failed
+- If waiting on another task, use addDependsOn and keep status pending
 - Never mark a task as completed if:
   - Tests are failing
   - Implementation is partial
@@ -812,15 +813,22 @@ Returns full task details:
 - **status**: The task status (see Status Workflow below)
 - **subject**: Change the task title (imperative form, e.g., "Run tests")
 - **description**: Change the task description
-- **activeForm**: Present continuous form shown in spinner when in_progress (e.g., "Running tests")
+- **activeForm**: Present continuous form shown while in_progress (e.g., "Running tests")
 - **owner**: Change the task owner (agent name)
 - **metadata**: Merge metadata keys into the task (set a key to null to delete it)
-- **addBlocks**: Mark tasks that cannot start until this one completes
-- **addBlockedBy**: Mark tasks that must complete before this one can start
+- **addDependents**: Mark tasks that depend on this one
+- **addDependsOn**: Mark task dependencies that must complete first
 
 ## Status Workflow
 
-Status progresses: \`pending\` → \`in_progress\` → \`stopped\` / \`completed\`
+Statuses: \`pending\`, \`in_progress\`, \`blocked\`, \`stopped\`, \`failed\`, \`completed\`.
+
+- \`pending\`: queued/not started, including normal dependency waits
+- \`in_progress\`: actively being worked
+- \`blocked\`: waiting on user action/input/permission
+- \`stopped\`: intentionally interrupted/cancelled
+- \`failed\`: fundamentally failed; assistant cannot recover without a new plan or external fix
+- \`completed\`: fully done
 
 Use \`deleted\` to permanently remove a task.
 
@@ -852,20 +860,20 @@ Claim a task by setting owner:
 
 Set up task dependencies:
 \`\`\`json
-{"taskId": "2", "addBlockedBy": ["1"]}
+{"taskId": "2", "addDependsOn": ["1"]}
 \`\`\``,
     parameters: Type.Object({
       taskId: Type.String({ description: "The ID of the task to update" }),
-      status: Type.Optional(StringEnum(["pending", "in_progress", "stopped", "completed", "deleted"] as const, {
+      status: Type.Optional(StringEnum(["pending", "in_progress", "blocked", "stopped", "failed", "completed", "deleted"] as const, {
         description: "New status for the task",
       })),
       subject: Type.Optional(Type.String({ description: "New subject for the task" })),
       description: Type.Optional(Type.String({ description: "New description for the task" })),
-      activeForm: Type.Optional(Type.String({ description: "Present continuous form shown in spinner when in_progress" })),
+      activeForm: Type.Optional(Type.String({ description: "Present continuous form shown while in_progress" })),
       owner: Type.Optional(Type.String({ description: "New owner for the task" })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Metadata keys to merge into the task. Set a key to null to delete it." })),
-      addBlocks: Type.Optional(Type.Array(Type.String(), { description: "Task IDs that this task blocks" })),
-      addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: "Task IDs that block this task" })),
+      addDependents: Type.Optional(Type.Array(Type.String(), { description: "Task IDs that depend on this task" })),
+      addDependsOn: Type.Optional(Type.Array(Type.String(), { description: "Task IDs this task depends on" })),
     }),
 
     execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -880,7 +888,7 @@ Set up task dependencies:
       if (fields.status === "in_progress") {
         widget.setActiveTask(taskId);
         autoClear.resetBatchCountdown();
-      } else if (fields.status === "pending" || fields.status === "stopped") {
+      } else if (fields.status === "pending" || fields.status === "blocked" || fields.status === "stopped" || fields.status === "failed") {
         widget.setActiveTask(taskId, false);
         autoClear.resetBatchCountdown();
       } else if (fields.status === "completed" || fields.status === "deleted") {
@@ -1034,7 +1042,7 @@ Set up task dependencies:
 ## When to Use This Tool
 
 - To start execution of tasks that have \`agentType\` set (created via TaskCreate with agentType parameter)
-- Tasks must be \`pending\` with all blockedBy dependencies \`completed\`
+- Tasks must be \`pending\` with all dependsOn dependencies \`completed\`
 - Each task runs as an independent background subagent
 
 ## Parameters
@@ -1079,13 +1087,13 @@ Set up task dependencies:
           continue;
         }
 
-        // Check all blockers are completed
-        const openBlockers = task.blockedBy.filter(bid => {
-          const blocker = store.get(bid);
-          return !blocker || blocker.status !== "completed";
+        // Check all dependencies are completed
+        const openDependencies = task.dependsOn.filter(bid => {
+          const dependency = store.get(bid);
+          return !dependency || dependency.status !== "completed";
         });
-        if (openBlockers.length > 0) {
-          results.push(`#${taskId}: blocked by ${openBlockers.map(id => "#" + id).join(", ")}`);
+        if (openDependencies.length > 0) {
+          results.push(`#${taskId}: depends on ${openDependencies.map(id => "#" + id).join(", ")}`);
           continue;
         }
 
@@ -1105,7 +1113,7 @@ Set up task dependencies:
           launched.push(`#${taskId} → agent ${agentId}`);
         } catch (err: any) {
           debug(`spawn:error task=#${taskId}`, err);
-          updateTask(taskId, { status: "pending" });
+          updateTask(taskId, { status: "failed", metadata: { ...task.metadata, lastError: err.message } });
           results.push(`#${taskId}: spawn failed — ${err.message}`);
         }
       }
@@ -1184,10 +1192,13 @@ Set up task dependencies:
 
         const statusIcon = (status: string) => {
           switch (status) {
-            case "completed": return "✔";
-            case "in_progress": return "◼";
+            case "pending": return "○";
+            case "in_progress": return "▶";
+            case "blocked": return "⊘";
             case "stopped": return "■";
-            default: return "◻";
+            case "failed": return "✗";
+            case "completed": return "✓";
+            default: return "○";
           }
         };
 
@@ -1211,7 +1222,7 @@ Set up task dependencies:
 
         const actions: string[] = [];
 
-        if (task.status === "pending" || task.status === "stopped") {
+        if (task.status === "pending" || task.status === "blocked" || task.status === "stopped" || task.status === "failed") {
           actions.push("▸ Start (in_progress)");
         }
         if (task.status === "in_progress") {

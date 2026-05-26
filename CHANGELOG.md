@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Task status model** — added `blocked` (waiting on user action) and `failed` (unrecoverable failure), keeping `stopped` for intentional interruption.
+- **Task dependency terminology** — renamed task dependency fields from `blocks`/`blockedBy` to `dependents`/`dependsOn`, with `TaskUpdate` fields `addDependents`/`addDependsOn`.
+- **Status icons** — standardized icons across widget/menu: `○` pending, `▶` in progress, `■` stopped, `✓` completed, `✗` failed, `⊘` blocked. Active in-progress tasks animate with play-shaped frames `▹`/`▸`/`▶`.
+
 ## [0.5.0] - 2026-04-28
 
 ### Changed
@@ -17,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.3] - 2026-04-28
 
 ### Added
-- **Cascade dependency-result injection** — when `autoCascade` is enabled, a cascaded subagent's prompt now includes a `## Prerequisite task results` section listing each completed blocker's stored `metadata.result` (capped at 4 KB per dep, with a truncation marker pointing at `TaskGet`). Cascaded agents previously had no context from their prerequisites. (#7)
+- **Cascade dependency-result injection** — when `autoCascade` is enabled, a cascaded subagent's prompt now includes a `## Prerequisite task results` section listing each completed dependency's stored `metadata.result` (capped at 4 KB per dep, with a truncation marker pointing at `TaskGet`). Cascaded agents previously had no context from their prerequisites. (#7)
 
 ### Performance
 - **Spinner render rate** — reduced widget animation interval from 80 ms (12.5 fps) to 150 ms (~6.7 fps). pi-tui's `requestRender()` triggers a full component-tree re-render with no scoped invalidation, so the spinner alone could drive sustained ~70-100% single-core CPU on long sessions. ~47% fewer renders, well above the perceptual threshold where the twinkling-star animation reads as alive. (#11)
@@ -29,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.2] - 2026-03-24
 
 ### Added
-- **Task numbers in widget** — each task line now shows its `#id` (e.g., `◻ #3 Do something`), making blocker references like `blocked by #3` easy to cross-reference at a glance. Numbers are dimmed so they stay readable without competing with the task subject.
+- **Task numbers in widget** — each task line now shows its `#id` (e.g., `○ #3 Do something`), making dependency references like `depends on #3` easy to cross-reference at a glance. Numbers are dimmed so they stay readable without competing with the task subject.
 
 ## [0.4.1] - 2026-03-22
 
@@ -62,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **TaskOutput/TaskStop accept agent IDs** — both tools now resolve agent IDs (including partial prefixes) to task IDs via `agentTaskMap`, fixing the mismatch where TaskExecute returns agent IDs but TaskOutput/TaskStop only accepted task IDs.
 - **TaskGet shows metadata** — non-empty metadata is now displayed in TaskGet output as JSON.
-- **TaskGet filters completed blockers** — consistent with TaskList, TaskGet now only shows open (non-completed) blockers instead of all dependency edges.
+- **TaskGet filters completed dependencies** — consistent with TaskList, TaskGet now only shows open (non-completed) dependencies instead of all dependency edges.
 - **TaskExecute success message** — now includes guidance to use TaskOutput for progress and not spawn duplicate agents.
 - **Softened TaskExecute description** — removed "Requires @tintinweb/pi-subagents extension" from the tool description to prevent agents from refusing to use it when the extension is loaded.
 - **Stopped subagents handled gracefully** — `subagents:failed` listener now distinguishes intentional stops (status `"stopped"` → mark completed, preserve partial result) from actual errors (revert to pending).
@@ -114,14 +119,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Agent-task mapping** — in-memory `agentTaskMap` (agentId → taskId) replaces linear `store.list().find()` scans for O(1) completion event lookup.
 - **Spawn error handling** — `spawnSubagent()` returns a Promise with 30s timeout. Failed spawns revert tasks to `pending` with error in metadata instead of silently failing.
 - **Removed `SubagentBridge` type** — the `types.ts` interface for the global registry bridge is no longer needed.
-- **Widget icon colors** — completed tasks show green `✔`, in-progress tasks show accent-colored `◼` (matching Claude Code's UI).
+- **Widget icon colors** — completed tasks show green `✓`, in-progress tasks show accent-colored `▶` (matching Claude Code's UI).
 
 ## [0.2.0] - 2026-03-12
 
 ### Added
 - **`TaskExecute` tool** — execute tasks as background subagents via @tintinweb/pi-subagents. Tasks with `agentType` metadata are spawned as independent agents; validates status, dependencies, and agent type before launching.
 - **`agentType` parameter on `TaskCreate`** — opt-in field (e.g., `"general-purpose"`, `"Explore"`) that marks tasks for subagent execution.
-- **Auto-cascade** — when enabled via `/tasks` → Settings, completed agent tasks automatically trigger execution of their unblocked dependents, flowing through the task DAG like a build system. Off by default.
+- **Auto-cascade** — when enabled via `/tasks` → Settings, completed agent tasks automatically trigger execution of their eligible dependents, flowing through the task DAG like a build system. Off by default.
 - **Subagent completion listener** — listens to `subagents:completed` and `subagents:failed` events to automatically update task status. Failed tasks revert to `pending` with error stored in metadata.
 - **READY tags in system prompt** — pending tasks with `agentType` and all dependencies completed are marked `[READY — use TaskExecute to start]` in the system prompt.
 - **Agent ID in widget** — in-progress tasks backed by subagents show the agent ID (e.g., `✳ Writing tests (agent abc12)…`).
@@ -142,10 +147,10 @@ Initial release — Claude Code-style task tracking and coordination for pi.
 - **System-reminder injection** — periodic `<system-reminder>` nudges appended to non-task tool results when tasks exist but task tools haven't been used for 4+ turns. Matches Claude Code's host-level reminder mechanism.
 - **Prompt guidelines** — `promptGuidelines` on TaskCreate injects persistent guidance into the system prompt, nudging the LLM to use task tools for complex work.
 - **Task state in system prompt** — `before_agent_start` event appends current task state to the system prompt on every agent loop, ensuring task awareness survives context compaction.
-- **Persistent widget** — live task list above editor with `✔` (completed, strikethrough + dim), `◼` (in-progress), `◻` (pending), animated star spinner (`✳✽`) for active tasks with elapsed time and token counts (e.g., `✳ Running tests… (2m 49s · ↑ 4.1k ↓ 1.2k)`).
+- **Persistent widget** — live task list above editor with `✓` (completed, strikethrough + dim), `▶` (in-progress), `○` (pending), animated star spinner (`✳✽`) for active tasks with elapsed time and token counts (e.g., `✳ Running tests… (2m 49s · ↑ 4.1k ↓ 1.2k)`).
 - **Multiple parallel active tasks** — widget supports multiple simultaneous spinners.
 - **`/tasks` command** — interactive menu: view tasks with actions (start, complete, delete), create tasks, clear completed.
-- **Bidirectional dependency management** — `addBlocks`/`addBlockedBy` maintain both sides automatically. Edges cleaned up on task deletion.
+- **Bidirectional dependency management** — `addDependents`/`addDependsOn` maintain both sides automatically. Edges cleaned up on task deletion.
 - **Dependency warnings** — cycles, self-dependencies, and dangling references produce warnings in TaskUpdate responses. Edges are still stored, matching Claude Code's permissive behavior.
 - **File-backed shared storage** — set `PI_TASK_LIST_ID` env var for multi-session coordination at `~/.pi/tasks/<id>.json`. File locking with stale-lock detection prevents race conditions.
 - **In-memory session-scoped mode** — default when no env var is set, zero disk I/O.

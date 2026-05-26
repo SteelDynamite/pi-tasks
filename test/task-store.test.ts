@@ -70,11 +70,16 @@ describe("TaskStore (in-memory)", () => {
     expect(changedFields).toEqual(["status"]);
   });
 
-  it("supports stopped status", () => {
-    store.create("Test", "Desc");
-    const { task, changedFields } = store.update("1", { status: "stopped" });
+  it("supports blocked, stopped, and failed statuses", () => {
+    store.create("Blocked", "Desc");
+    store.create("Stopped", "Desc");
+    store.create("Failed", "Desc");
 
-    expect(task!.status).toBe("stopped");
+    expect(store.update("1", { status: "blocked" }).task!.status).toBe("blocked");
+    expect(store.update("2", { status: "stopped" }).task!.status).toBe("stopped");
+    const { task, changedFields } = store.update("3", { status: "failed" });
+
+    expect(task!.status).toBe("failed");
     expect(changedFields).toEqual(["status"]);
   });
 
@@ -121,50 +126,50 @@ describe("TaskStore (in-memory)", () => {
     expect(task.metadata).toEqual({ a: 1, c: 3, d: 4 });
   });
 
-  it("sets up bidirectional blocks via addBlocks", () => {
+  it("sets up bidirectional dependents via addDependents", () => {
     store.create("Blocker", "Desc");
     store.create("Blocked", "Desc");
 
-    store.update("1", { addBlocks: ["2"] });
+    store.update("1", { addDependents: ["2"] });
 
     const t1 = store.get("1")!;
     const t2 = store.get("2")!;
-    expect(t1.blocks).toContain("2");
-    expect(t2.blockedBy).toContain("1");
+    expect(t1.dependents).toContain("2");
+    expect(t2.dependsOn).toContain("1");
   });
 
-  it("sets up bidirectional blocks via addBlockedBy", () => {
+  it("sets up bidirectional dependents via addDependsOn", () => {
     store.create("Blocker", "Desc");
     store.create("Blocked", "Desc");
 
-    store.update("2", { addBlockedBy: ["1"] });
+    store.update("2", { addDependsOn: ["1"] });
 
     const t1 = store.get("1")!;
     const t2 = store.get("2")!;
-    expect(t1.blocks).toContain("2");
-    expect(t2.blockedBy).toContain("1");
+    expect(t1.dependents).toContain("2");
+    expect(t2.dependsOn).toContain("1");
   });
 
   it("does not duplicate dependency edges", () => {
     store.create("A", "Desc");
     store.create("B", "Desc");
 
-    store.update("1", { addBlocks: ["2"] });
-    store.update("1", { addBlocks: ["2"] }); // duplicate
+    store.update("1", { addDependents: ["2"] });
+    store.update("1", { addDependents: ["2"] }); // duplicate
 
     const t1 = store.get("1")!;
-    expect(t1.blocks.filter(id => id === "2")).toHaveLength(1);
+    expect(t1.dependents.filter(id => id === "2")).toHaveLength(1);
   });
 
   it("cleans up dependency edges on deletion", () => {
     store.create("A", "Desc");
     store.create("B", "Desc");
-    store.update("1", { addBlocks: ["2"] });
+    store.update("1", { addDependents: ["2"] });
 
     store.update("1", { status: "deleted" });
 
     const t2 = store.get("2")!;
-    expect(t2.blockedBy).toEqual([]);
+    expect(t2.dependsOn).toEqual([]);
   });
 
   it("clears completed tasks", () => {
@@ -203,32 +208,32 @@ describe("TaskStore (in-memory)", () => {
   it("allows circular dependencies with warning", () => {
     store.create("A", "Desc");
     store.create("B", "Desc");
-    store.update("1", { addBlocks: ["2"] });
-    const { warnings } = store.update("2", { addBlocks: ["1"] });
+    store.update("1", { addDependents: ["2"] });
+    const { warnings } = store.update("2", { addDependents: ["1"] });
 
-    expect(store.get("1")!.blocks).toContain("2");
-    expect(store.get("2")!.blocks).toContain("1");
-    expect(warnings).toContain("cycle: #2 and #1 block each other");
+    expect(store.get("1")!.dependents).toContain("2");
+    expect(store.get("2")!.dependents).toContain("1");
+    expect(warnings).toContain("cycle: #2 and #1 depend on each other");
   });
 
   it("allows self-dependency with warning", () => {
     store.create("Self", "Desc");
-    const { warnings } = store.update("1", { addBlocks: ["1"] });
-    expect(store.get("1")!.blocks).toContain("1");
-    expect(warnings).toContain("#1 blocks itself");
+    const { warnings } = store.update("1", { addDependents: ["1"] });
+    expect(store.get("1")!.dependents).toContain("1");
+    expect(warnings).toContain("#1 depends on itself");
   });
 
   it("stores dangling edge IDs with warning", () => {
     store.create("Real", "Desc");
-    const { warnings } = store.update("1", { addBlocks: ["9999"] });
-    expect(store.get("1")!.blocks).toContain("9999");
+    const { warnings } = store.update("1", { addDependents: ["9999"] });
+    expect(store.get("1")!.dependents).toContain("9999");
     expect(warnings).toContain("#9999 does not exist");
   });
 
   it("returns no warnings for valid dependencies", () => {
     store.create("A", "Desc");
     store.create("B", "Desc");
-    const { warnings } = store.update("1", { addBlocks: ["2"] });
+    const { warnings } = store.update("1", { addDependents: ["2"] });
     expect(warnings).toEqual([]);
   });
 
@@ -261,47 +266,47 @@ describe("TaskStore (in-memory)", () => {
   it("clearCompleted cleans up dependency edges", () => {
     store.create("Blocker", "Desc");
     store.create("Blocked", "Desc");
-    store.update("1", { addBlocks: ["2"] });
+    store.update("1", { addDependents: ["2"] });
     store.update("1", { status: "completed" });
 
     store.clearCompleted();
 
     const t2 = store.get("2")!;
-    expect(t2.blockedBy).toEqual([]);
+    expect(t2.dependsOn).toEqual([]);
   });
 
-  it("handles multiple addBlocks in one call", () => {
+  it("handles multiple addDependents in one call", () => {
     store.create("Blocker", "Desc");
     store.create("B1", "Desc");
     store.create("B2", "Desc");
 
-    store.update("1", { addBlocks: ["2", "3"] });
+    store.update("1", { addDependents: ["2", "3"] });
 
-    expect(store.get("1")!.blocks).toEqual(["2", "3"]);
-    expect(store.get("2")!.blockedBy).toContain("1");
-    expect(store.get("3")!.blockedBy).toContain("1");
+    expect(store.get("1")!.dependents).toEqual(["2", "3"]);
+    expect(store.get("2")!.dependsOn).toContain("1");
+    expect(store.get("3")!.dependsOn).toContain("1");
   });
 
-  it("addBlockedBy warns on self-dependency", () => {
+  it("addDependsOn warns on self-dependency", () => {
     store.create("Self", "Desc");
-    const { warnings } = store.update("1", { addBlockedBy: ["1"] });
-    expect(store.get("1")!.blockedBy).toContain("1");
-    expect(warnings).toContain("#1 blocks itself");
+    const { warnings } = store.update("1", { addDependsOn: ["1"] });
+    expect(store.get("1")!.dependsOn).toContain("1");
+    expect(warnings).toContain("#1 depends on itself");
   });
 
-  it("addBlockedBy warns on dangling ref", () => {
+  it("addDependsOn warns on dangling ref", () => {
     store.create("Real", "Desc");
-    const { warnings } = store.update("1", { addBlockedBy: ["9999"] });
-    expect(store.get("1")!.blockedBy).toContain("9999");
+    const { warnings } = store.update("1", { addDependsOn: ["9999"] });
+    expect(store.get("1")!.dependsOn).toContain("9999");
     expect(warnings).toContain("#9999 does not exist");
   });
 
-  it("addBlockedBy warns on cycle", () => {
+  it("addDependsOn warns on cycle", () => {
     store.create("A", "Desc");
     store.create("B", "Desc");
-    store.update("1", { addBlocks: ["2"] });
-    const { warnings } = store.update("1", { addBlockedBy: ["2"] });
-    expect(warnings).toContain("cycle: #1 and #2 block each other");
+    store.update("1", { addDependents: ["2"] });
+    const { warnings } = store.update("1", { addDependsOn: ["2"] });
+    expect(warnings).toContain("cycle: #1 and #2 depend on each other");
   });
 
   it("clearCompleted returns 0 when no completed tasks", () => {
@@ -309,29 +314,32 @@ describe("TaskStore (in-memory)", () => {
     expect(store.clearCompleted()).toBe(0);
   });
 
-  it("list sorts pending → in_progress → stopped → completed with all statuses present", () => {
+  it("list sorts pending → in_progress → blocked → stopped → failed → completed with all statuses present", () => {
     store.create("Pending task", "Desc");
     store.create("Completed task", "Desc");
     store.create("In-progress task", "Desc");
     store.create("Stopped task", "Desc");
     store.create("Another pending", "Desc");
+    store.create("Blocked task", "Desc");
+    store.create("Failed task", "Desc");
 
     store.update("2", { status: "completed" });
     store.update("3", { status: "in_progress" });
     store.update("4", { status: "stopped" });
+    store.update("6", { status: "blocked" });
+    store.update("7", { status: "failed" });
 
     const tasks = store.list();
-    // Store returns by ID; TaskList tool sorts by status group
-    // Here we verify the raw list order (by ID), then test status-grouped sort
-    const statusOrder: Record<string, number> = { pending: 0, in_progress: 1, stopped: 2, completed: 3 };
+    // Store returns by ID; TaskList tool sorts by status group.
+    const statusOrder: Record<string, number> = { pending: 0, in_progress: 1, blocked: 2, stopped: 3, failed: 4, completed: 5 };
     const sorted = [...tasks].sort((a, b) => {
       const so = (statusOrder[a.status] ?? 0) - (statusOrder[b.status] ?? 0);
       if (so !== 0) return so;
       return Number(a.id) - Number(b.id);
     });
 
-    expect(sorted.map(t => t.id)).toEqual(["1", "5", "3", "4", "2"]);
-    expect(sorted.map(t => t.status)).toEqual(["pending", "pending", "in_progress", "stopped", "completed"]);
+    expect(sorted.map(t => t.id)).toEqual(["1", "5", "3", "6", "4", "7", "2"]);
+    expect(sorted.map(t => t.status)).toEqual(["pending", "pending", "in_progress", "blocked", "stopped", "failed", "completed"]);
   });
 });
 

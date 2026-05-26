@@ -12,11 +12,11 @@ https://github.com/user-attachments/assets/1d0ee87a-e0a5-4bfa-a9b9-2f9144cb905b
 
 ## Features
 
-- **7 LLM-callable tools** — `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`, `TaskOutput`, `TaskStop`, `TaskExecute` — matching Claude Code's exact tool specs and descriptions
-- **Persistent widget** — live task list above the editor with `✔`/`◼`/`■`/`◻` status icons, task numbers (`#1`, `#2`, …), strikethrough for completed tasks, star spinner (`✳✽`) for active tasks with elapsed time and token counts
+- **7 LLM-callable tools** — `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`, `TaskOutput`, `TaskStop`, `TaskExecute` — Claude Code-style task specs adapted for pi
+- **Persistent widget** — live task list above the editor with `○`/`▶`/`■`/`✓`/`✗`/`⊘` status icons, task numbers (`#1`, `#2`, …), strikethrough for completed tasks, and active task elapsed time/token counts
 - **System-reminder injection** — periodic `<system-reminder>` nudges appended to tool results when task tools haven't been used recently (matches Claude Code's behavior exactly)
 - **Prompt guidelines** — workflow contract encoded in tool descriptions, nudging the LLM at the point of tool use
-- **Dependency management** — bidirectional `blocks`/`blockedBy` relationships with warnings for cycles, self-deps, and dangling references
+- **Dependency management** — bidirectional `dependents`/`dependsOn` relationships with warnings for cycles, self-deps, and dangling references
 - **Shared task lists** — multiple pi sessions can share a file-backed task list for agent team coordination
 - **File locking** — concurrent access is safe when multiple sessions share a task list
 - **Background process tracking** — track spawned processes with output buffering, blocking wait, and graceful stop
@@ -39,19 +39,24 @@ pi -e ./src/index.ts
 The extension renders a persistent widget above the editor:
 
 ```
-● 4 tasks (1 done, 1 in progress, 2 open)
-  ✔ #1 Design the flux capacitor
-  ✳ #2 Acquiring plutonium… (2m 49s · ↑ 4.1k ↓ 1.2k)
-  ◻ #3 Install flux capacitor in DeLorean › blocked by #1
-  ◻ #4 Test time travel at 88 mph › blocked by #2, #3
+● 6 tasks (1 done, 1 in progress, 1 blocked, 1 stopped, 1 failed, 1 pending)
+  ✓ #1 Design the flux capacitor
+  ▸ #2 Acquiring plutonium… (2m 49s · ↑ 4.1k ↓ 1.2k)
+  ○ #3 Install flux capacitor in DeLorean › depends on #2
+  ⊘ #4 Waiting for plutonium permit
+  ■ #5 Test time travel at 88 mph
+  ✗ #6 Repair irrecoverable paradox
 ```
 
 | Icon | Meaning |
 |------|---------|
-| `✔` | Completed (strikethrough + dim) |
-| `◼` | In-progress (not actively executing) |
-| `◻` | Pending |
-| `✳`/`✽` | Animated star spinner — actively executing task (shows `activeForm` text, elapsed time, token counts) |
+| `○` | Pending |
+| `▶` | In-progress |
+| `▹`/`▸`/`▶` | Active in-progress animation |
+| `■` | Stopped by user/cancelled |
+| `✓` | Completed (strikethrough + dim) |
+| `✗` | Failed |
+| `⊘` | Blocked waiting on user action |
 
 ## Tools
 
@@ -63,7 +68,7 @@ Create a structured task. Used proactively for complex multi-step work.
 |-----------|------|----------|-------------|
 | `subject` | string | yes | Brief imperative title |
 | `description` | string | yes | Detailed context and acceptance criteria |
-| `activeForm` | string | no | Present continuous form for spinner (e.g., "Running tests") |
+| `activeForm` | string | no | Present continuous form shown while in progress (e.g., "Running tests") |
 | `agentType` | string | no | Agent type for subagent execution (e.g., `"general-purpose"`, `"Explore"`) |
 | `metadata` | object | no | Arbitrary key-value pairs |
 
@@ -73,15 +78,15 @@ Create a structured task. Used proactively for complex multi-step work.
 
 ### `TaskList`
 
-List all tasks with status, owner, and blocked-by info.
+List all tasks with status, owner, and dependency info.
 
 ```
 #1 [pending] Fix authentication bug
 #2 [in_progress] Write unit tests (agent-1)
-#3 [pending] Update docs [blocked by #1, #2]
+#3 [pending] Update docs [depends on #1, #2]
 ```
 
-Sort order: pending first, then in-progress, then completed (each group by ID).
+Sort order: pending, in-progress, blocked, stopped, failed, completed (each group by ID).
 
 ### `TaskGet`
 
@@ -92,8 +97,8 @@ Task #2: Write unit tests
 Status: in_progress
 Owner: agent-1
 Description: Add tests for the auth module
-Blocked by: #1
-Blocks: #3
+Depends on: #1
+Dependents: #3
 ```
 
 Shows owner (if set) and open (non-completed) dependency edges. Non-empty metadata is displayed as JSON.
@@ -105,26 +110,26 @@ Update task fields, status, metadata, and dependencies.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `taskId` | string | Task ID (required) |
-| `status` | `pending` / `in_progress` / `stopped` / `completed` / `deleted` | New status |
+| `status` | `pending` / `in_progress` / `blocked` / `stopped` / `failed` / `completed` / `deleted` | New status |
 | `subject` | string | New title |
 | `description` | string | New description |
-| `activeForm` | string | Spinner text |
+| `activeForm` | string | In-progress display text |
 | `owner` | string | Agent name |
 | `metadata` | object | Shallow merge (null values delete keys) |
-| `addBlocks` | string[] | Task IDs this task blocks |
-| `addBlockedBy` | string[] | Task IDs that block this task |
+| `addDependents` | string[] | Task IDs that depend on this task |
+| `addDependsOn` | string[] | Task IDs this task depends on |
 
 ```
 → Updated task #1 status
 → Updated task #2 owner, status
-→ Updated task #3 blocks
-→ Updated task #3 blocks (warning: cycle: #3 and #1 block each other)
+→ Updated task #3 dependents
+→ Updated task #3 dependents (warning: cycle: #3 and #1 depend on each other)
 → Updated task #1 deleted
 ```
 
 Setting `status: "deleted"` permanently removes the task.
 
-Dependencies are bidirectional: `addBlocks: ["3"]` on task 1 also adds `blockedBy: ["1"]` to task 3.
+Dependencies are bidirectional: `addDependents: ["3"]` on task 1 also adds `dependsOn: ["1"]` to task 3.
 
 ### `TaskOutput`
 
@@ -157,26 +162,28 @@ Execute one or more tasks as background subagents. Requires [@tintinweb/pi-subag
 | `model` | string | Model override (e.g., `"sonnet"`, `"haiku"`) |
 | `max_turns` | number | Max turns per agent |
 
-Tasks must be `pending`, have `agentType` set, and all `blockedBy` dependencies `completed`. Each task spawns as an independent background subagent.
+Tasks must be `pending`, have `agentType` set, and all `dependsOn` dependencies `completed`. Each task spawns as an independent background subagent.
 
-With **auto-cascade** enabled (via `/tasks` → Settings), completed tasks automatically trigger execution of their unblocked dependents — flowing through the DAG like a build system. Each cascaded agent receives its prerequisites' stored results in the prompt, so it can build directly on what came before without re-fetching.
+With **auto-cascade** enabled (via `/tasks` → Settings), completed tasks automatically trigger execution of their eligible dependents — flowing through the DAG like a build system. Each cascaded agent receives its prerequisites' stored results in the prompt, so it can build directly on what came before without re-fetching.
 
 ## Task Lifecycle
 
 ```
 pending → in_progress → completed
                       → stopped
-                      → deleted (permanently removed)
+                      → failed
+pending → blocked (waiting on user) → pending/in_progress
+any state → deleted (permanently removed)
 ```
 
-Tasks are created as `pending`. Mark `in_progress` before starting work, `completed` when done, and `stopped` when aborted or intentionally stopped. `deleted` removes entirely — IDs never reset.
+Tasks are created as `pending`. Mark `in_progress` before starting work, `blocked` when waiting on user action/input/permission, `stopped` when intentionally interrupted, `failed` when the assistant cannot recover, and `completed` only when fully done. `deleted` removes entirely — IDs never reset.
 
 ## Dependency Management
 
-- **Bidirectional edges:** `addBlocks`/`addBlockedBy` maintain both sides automatically
+- **Bidirectional edges:** `addDependents`/`addDependsOn` maintain both sides automatically
 - **Dependency warnings:** cycles, self-dependencies, and references to non-existent tasks are stored but produce warnings in the tool response
-- **Display-time filtering:** `TaskList` only shows non-completed blockers in `[blocked by ...]`
-- **Raw data preserved:** `TaskGet` shows ALL edges, including completed blockers
+- **Display-time filtering:** `TaskList` only shows non-completed dependencies in `[depends on ...]`
+- **Stored edges preserved:** completed dependency edges remain in storage even when hidden from `TaskList`
 - **Cleanup on deletion:** removing a task cleans up all edges pointing to it
 
 ## Task Storage
@@ -308,7 +315,7 @@ src/
 ├── tasks-config.ts     # Config persistence (taskScope, autoCascade, autoClearCompleted) → .pi/tasks-config.json when settings are changed
 ├── process-tracker.ts  # Background process output buffering and stop
 └── ui/
-    ├── task-widget.ts  # Persistent widget with status icons and spinner
+    ├── task-widget.ts  # Persistent widget with status icons and active-task stats
     └── settings-menu.ts  # /tasks → Settings panel (SettingsList TUI component)
 ```
 

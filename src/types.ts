@@ -2,7 +2,7 @@
  * types.ts — Type definitions for the task management system.
  */
 
-export type TaskStatus = "pending" | "in_progress" | "stopped" | "completed";
+export type TaskStatus = "pending" | "in_progress" | "blocked" | "stopped" | "failed" | "completed";
 
 export interface Task {
   id: string;
@@ -12,8 +12,8 @@ export interface Task {
   activeForm?: string;
   owner?: string;
   metadata: Record<string, any>;
-  blocks: string[];
-  blockedBy: string[];
+  dependents: string[];
+  dependsOn: string[];
   createdAt: number;
   updatedAt: number;
 }

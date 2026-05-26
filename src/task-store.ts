@@ -14,8 +14,8 @@ function cloneTask(task: Task): Task {
   return {
     ...task,
     metadata: { ...task.metadata },
-    blocks: [...task.blocks],
-    blockedBy: [...task.blockedBy],
+    dependents: [...task.dependents],
+    dependsOn: [...task.dependsOn],
   };
 }
 
@@ -93,14 +93,19 @@ export class TaskStore {
     if (!Array.isArray(data?.tasks)) return;
 
     let maxId = 0;
-    for (const task of data.tasks) {
+    for (const rawTask of data.tasks) {
+      const task = rawTask as Partial<Task> & { blocks?: string[]; blockedBy?: string[] };
       if (!task?.id) continue;
       const cloned: Task = {
-        ...task,
+        id: task.id,
+        subject: task.subject ?? "",
+        description: task.description ?? "",
         status: task.status ?? "pending",
+        activeForm: task.activeForm,
+        owner: task.owner,
         metadata: { ...(task.metadata ?? {}) },
-        blocks: Array.isArray(task.blocks) ? [...task.blocks] : [],
-        blockedBy: Array.isArray(task.blockedBy) ? [...task.blockedBy] : [],
+        dependents: Array.isArray(task.dependents) ? [...task.dependents] : Array.isArray(task.blocks) ? [...task.blocks] : [],
+        dependsOn: Array.isArray(task.dependsOn) ? [...task.dependsOn] : Array.isArray(task.blockedBy) ? [...task.blockedBy] : [],
         createdAt: task.createdAt ?? Date.now(),
         updatedAt: task.updatedAt ?? Date.now(),
       };
@@ -117,11 +122,7 @@ export class TaskStore {
     if (!existsSync(this.filePath)) return;
     try {
       const data: TaskStoreData = JSON.parse(readFileSync(this.filePath, "utf-8"));
-      this.nextId = data.nextId;
-      this.tasks.clear();
-      for (const t of data.tasks) {
-        this.tasks.set(t.id, t);
-      }
+      this.loadSnapshot(data);
     } catch { /* corrupt file — start fresh */ }
   }
 
@@ -162,8 +163,8 @@ export class TaskStore {
         activeForm,
         owner: undefined,
         metadata: metadata ?? {},
-        blocks: [],
-        blockedBy: [],
+        dependents: [],
+        dependsOn: [],
         createdAt: now,
         updatedAt: now,
       };
@@ -190,6 +191,9 @@ export class TaskStore {
     activeForm?: string;
     owner?: string;
     metadata?: Record<string, any>;
+    addDependents?: string[];
+    addDependsOn?: string[];
+    /** Deprecated aliases accepted for old callers. */
     addBlocks?: string[];
     addBlockedBy?: string[];
   }): { task: Task | undefined; changedFields: string[]; warnings: string[] } {
@@ -205,8 +209,8 @@ export class TaskStore {
         this.tasks.delete(id);
         // Clean up dependency edges pointing to this task
         for (const t of this.tasks.values()) {
-          t.blocks = t.blocks.filter(bid => bid !== id);
-          t.blockedBy = t.blockedBy.filter(bid => bid !== id);
+          t.dependents = t.dependents.filter(depId => depId !== id);
+          t.dependsOn = t.dependsOn.filter(depId => depId !== id);
         }
         return { task: undefined, changedFields: ["deleted"], warnings: [] };
       }
@@ -245,48 +249,50 @@ export class TaskStore {
       }
 
       // Bidirectional dependency edges
-      if (fields.addBlocks && fields.addBlocks.length > 0) {
-        for (const targetId of fields.addBlocks) {
-          if (!task.blocks.includes(targetId)) {
-            task.blocks.push(targetId);
+      const addDependents = [...(fields.addDependents ?? []), ...(fields.addBlocks ?? [])];
+      if (addDependents.length > 0) {
+        for (const targetId of addDependents) {
+          if (!task.dependents.includes(targetId)) {
+            task.dependents.push(targetId);
           }
           const target = this.tasks.get(targetId);
-          if (target && !target.blockedBy.includes(id)) {
-            target.blockedBy.push(id);
+          if (target && !target.dependsOn.includes(id)) {
+            target.dependsOn.push(id);
             target.updatedAt = Date.now();
           }
           // Warnings for problematic edges
           if (targetId === id) {
-            warnings.push(`#${id} blocks itself`);
+            warnings.push(`#${id} depends on itself`);
           } else if (!target) {
             warnings.push(`#${targetId} does not exist`);
-          } else if (target.blocks.includes(id)) {
-            warnings.push(`cycle: #${id} and #${targetId} block each other`);
+          } else if (task.dependsOn.includes(targetId)) {
+            warnings.push(`cycle: #${id} and #${targetId} depend on each other`);
           }
         }
-        changedFields.push("blocks");
+        changedFields.push("dependents");
       }
 
-      if (fields.addBlockedBy && fields.addBlockedBy.length > 0) {
-        for (const targetId of fields.addBlockedBy) {
-          if (!task.blockedBy.includes(targetId)) {
-            task.blockedBy.push(targetId);
+      const addDependsOn = [...(fields.addDependsOn ?? []), ...(fields.addBlockedBy ?? [])];
+      if (addDependsOn.length > 0) {
+        for (const targetId of addDependsOn) {
+          if (!task.dependsOn.includes(targetId)) {
+            task.dependsOn.push(targetId);
           }
           const target = this.tasks.get(targetId);
-          if (target && !target.blocks.includes(id)) {
-            target.blocks.push(id);
+          if (target && !target.dependents.includes(id)) {
+            target.dependents.push(id);
             target.updatedAt = Date.now();
           }
           // Warnings for problematic edges
           if (targetId === id) {
-            warnings.push(`#${id} blocks itself`);
+            warnings.push(`#${id} depends on itself`);
           } else if (!target) {
             warnings.push(`#${targetId} does not exist`);
-          } else if (task.blocks.includes(targetId)) {
-            warnings.push(`cycle: #${id} and #${targetId} block each other`);
+          } else if (task.dependents.includes(targetId)) {
+            warnings.push(`cycle: #${id} and #${targetId} depend on each other`);
           }
         }
-        changedFields.push("blockedBy");
+        changedFields.push("dependsOn");
       }
 
       task.updatedAt = Date.now();
@@ -301,8 +307,8 @@ export class TaskStore {
       this.tasks.delete(id);
       // Clean up dependency edges
       for (const t of this.tasks.values()) {
-        t.blocks = t.blocks.filter(bid => bid !== id);
-        t.blockedBy = t.blockedBy.filter(bid => bid !== id);
+        t.dependents = t.dependents.filter(depId => depId !== id);
+        t.dependsOn = t.dependsOn.filter(depId => depId !== id);
       }
       return true;
     });
@@ -338,8 +344,8 @@ export class TaskStore {
       if (count > 0) {
         const validIds = new Set(this.tasks.keys());
         for (const t of this.tasks.values()) {
-          t.blocks = t.blocks.filter(bid => validIds.has(bid));
-          t.blockedBy = t.blockedBy.filter(bid => validIds.has(bid));
+          t.dependents = t.dependents.filter(depId => validIds.has(depId));
+          t.dependsOn = t.dependsOn.filter(depId => validIds.has(depId));
         }
       }
       return count;
