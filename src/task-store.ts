@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
-import type { Task, TaskStatus, TaskStoreData } from "./types.js";
+import type { Task, TaskCreateFields, TaskStatus, TaskStoreData } from "./types.js";
 
 function cloneTask(task: Task): Task {
   return {
@@ -152,25 +152,31 @@ export class TaskStore {
     }
   }
 
+  private createUnlocked(fields: TaskCreateFields): Task {
+    const now = Date.now();
+    const task: Task = {
+      id: String(this.nextId++),
+      subject: fields.subject,
+      description: fields.description,
+      status: "pending",
+      activeForm: fields.activeForm,
+      owner: undefined,
+      metadata: fields.metadata ?? {},
+      dependents: [],
+      dependsOn: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.tasks.set(task.id, task);
+    return task;
+  }
+
   create(subject: string, description: string, activeForm?: string, metadata?: Record<string, any>): Task {
-    return this.withLock(() => {
-      const now = Date.now();
-      const task: Task = {
-        id: String(this.nextId++),
-        subject,
-        description,
-        status: "pending",
-        activeForm,
-        owner: undefined,
-        metadata: metadata ?? {},
-        dependents: [],
-        dependsOn: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-      this.tasks.set(task.id, task);
-      return task;
-    });
+    return this.createMany([{ subject, description, activeForm, metadata }])[0];
+  }
+
+  createMany(tasks: TaskCreateFields[]): Task[] {
+    return this.withLock(() => tasks.map(task => this.createUnlocked(task)));
   }
 
   get(id: string): Task | undefined {

@@ -95,12 +95,18 @@ describe("session-entry task persistence", () => {
     initExtension(mock.pi as any);
 
     await mock.fireLifecycle("session_start", { reason: "startup" });
-    await mock.executeTool("TaskCreate", { subject: "Session task", description: "Stored in session" });
+    await mock.executeTool("TaskCreate", { tasks: [
+      { subject: "Session task", description: "Stored in session" },
+      { subject: "Second session task", description: "Stored in session" },
+    ] });
 
     expect(mock.pi.appendEntry).toHaveBeenCalledWith("pi-tasks", expect.objectContaining({
       version: 1,
-      nextId: 2,
-      tasks: [expect.objectContaining({ id: "1", subject: "Session task" })],
+      nextId: 3,
+      tasks: [
+        expect.objectContaining({ id: "1", subject: "Session task" }),
+        expect.objectContaining({ id: "2", subject: "Second session task" }),
+      ],
     }));
     expect(existsSync(join(tmp, ".pi"))).toBe(false);
   });
@@ -146,7 +152,7 @@ describe("session-entry task persistence", () => {
     initExtension(mock.pi as any);
 
     await mock.fireLifecycle("session_start", { reason: "startup" });
-    await mock.executeTool("TaskCreate", { subject: "Project task", description: "Stored under ctx.cwd" });
+    await mock.executeTool("TaskCreate", { tasks: [{ subject: "Project task", description: "Stored under ctx.cwd" }] });
 
     expect(existsSync(join(project, ".pi", "tasks", "tasks.json"))).toBe(true);
     expect(existsSync(join(tmp, ".pi", "tasks", "tasks.json"))).toBe(false);

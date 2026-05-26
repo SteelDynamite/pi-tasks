@@ -4,6 +4,13 @@
 
 export type TaskStatus = "pending" | "in_progress" | "blocked" | "stopped" | "failed" | "completed";
 
+export interface TaskCreateFields {
+  subject: string;
+  description: string;
+  activeForm?: string;
+  metadata?: Record<string, any>;
+}
+
 export interface Task {
   id: string;
   subject: string;

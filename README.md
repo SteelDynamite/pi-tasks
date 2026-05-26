@@ -66,14 +66,17 @@ Create a structured task. Used proactively for complex multi-step work.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `subject` | string | yes | Brief imperative title |
-| `description` | string | yes | Detailed context and acceptance criteria |
-| `activeForm` | string | no | Present continuous form shown while in progress (e.g., "Running tests") |
-| `agentType` | string | no | Agent type for subagent execution (e.g., `"general-purpose"`, `"Explore"`) |
-| `metadata` | object | no | Arbitrary key-value pairs |
+| `tasks` | array | yes | Tasks to create |
+| `tasks[].subject` | string | yes | Brief imperative title |
+| `tasks[].description` | string | yes | Detailed context and acceptance criteria |
+| `tasks[].activeForm` | string | no | Present continuous form shown while in progress (e.g., "Running tests") |
+| `tasks[].agentType` | string | no | Agent type for subagent execution (e.g., `"general-purpose"`, `"Explore"`) |
+| `tasks[].metadata` | object | no | Arbitrary key-value pairs |
 
 ```
-→ Task #1 created successfully: Fix authentication bug
+→ Created 2 tasks:
+#1 Fix authentication bug
+#2 Write unit tests
 ```
 
 ### `TaskList`

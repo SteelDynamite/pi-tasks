@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **TaskCreate batch-only input** — `TaskCreate` now accepts `tasks: [...]` instead of top-level task fields, allowing multiple tasks in one tool call.
 - **Task status model** — added `blocked` (waiting on user action) and `failed` (unrecoverable failure), keeping `stopped` for intentional interruption.
 - **Task dependency terminology** — renamed task dependency fields from `blocks`/`blockedBy` to `dependents`/`dependsOn`, with `TaskUpdate` fields `addDependents`/`addDependsOn`.
 - **Status icons** — standardized icons across widget/menu: `○` pending, `▶` in progress, `■` stopped, `✓` completed, `✗` failed, `⊘` blocked. Active in-progress tasks animate with play-shaped frames `▹`/`▸`/`▶`.

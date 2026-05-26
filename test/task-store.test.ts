@@ -29,6 +29,17 @@ describe("TaskStore (in-memory)", () => {
     expect(t.metadata).toEqual({ key: "value" });
   });
 
+  it("creates many tasks with sequential IDs", () => {
+    const tasks = store.createMany([
+      { subject: "First", description: "Desc 1" },
+      { subject: "Second", description: "Desc 2", activeForm: "Doing second", metadata: { key: "value" } },
+    ]);
+
+    expect(tasks.map(task => task.id)).toEqual(["1", "2"]);
+    expect(tasks[1].activeForm).toBe("Doing second");
+    expect(tasks[1].metadata).toEqual({ key: "value" });
+  });
+
   it("exports and restores snapshots", () => {
     store.create("Task", "Desc", "Running task", { key: "value" });
     store.update("1", { status: "in_progress" });

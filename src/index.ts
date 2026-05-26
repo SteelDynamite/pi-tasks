@@ -125,6 +125,12 @@ export default function (pi: ExtensionAPI) {
     return task;
   }
 
+  function addTasks(...args: Parameters<TaskStore["createMany"]>) {
+    const tasks = store.createMany(...args);
+    if (tasks.length > 0) persistSessionState();
+    return tasks;
+  }
+
   function updateTask(...args: Parameters<TaskStore["update"]>) {
     const result = store.update(...args);
     if (result.changedFields.length > 0) persistSessionState();
@@ -595,9 +601,12 @@ NOTE that you should not use this tool if there is only one trivial task to do. 
 
 ## Task Fields
 
-- **subject**: A brief, actionable title in imperative form (e.g., "Fix authentication bug in login flow")
-- **description**: Detailed description of what needs to be done, including context and acceptance criteria
-- **activeForm** (optional): Present continuous form shown while the task is in_progress (e.g., "Fixing authentication bug"). If omitted, the subject is shown.
+- **tasks**: Array of tasks to create. Must contain at least one task.
+- **tasks[].subject**: A brief, actionable title in imperative form (e.g., "Fix authentication bug in login flow")
+- **tasks[].description**: Detailed description of what needs to be done, including context and acceptance criteria
+- **tasks[].activeForm** (optional): Present continuous form shown while the task is in_progress (e.g., "Fixing authentication bug"). If omitted, the subject is shown.
+- **tasks[].agentType** (optional): Agent type for subagent execution via TaskExecute.
+- **tasks[].metadata** (optional): Arbitrary metadata to attach to the task.
 
 All tasks are created with status \`pending\`.
 
@@ -614,20 +623,33 @@ All tasks are created with status \`pending\`.
       "Use TaskList to check for available work after completing a task.",
     ],
     parameters: Type.Object({
-      subject: Type.String({ description: "A brief title for the task" }),
-      description: Type.String({ description: "A detailed description of what needs to be done" }),
-      activeForm: Type.Optional(Type.String({ description: "Present continuous form shown while in_progress (e.g., 'Running tests')" })),
-      agentType: Type.Optional(Type.String({ description: "Agent type for subagent execution (e.g., 'general-purpose', 'Explore'). Tasks with agentType can be started via TaskExecute." })),
-      metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
+      tasks: Type.Array(Type.Object({
+        subject: Type.String({ description: "A brief title for the task" }),
+        description: Type.String({ description: "A detailed description of what needs to be done" }),
+        activeForm: Type.Optional(Type.String({ description: "Present continuous form shown while in_progress (e.g., 'Running tests')" })),
+        agentType: Type.Optional(Type.String({ description: "Agent type for subagent execution (e.g., 'general-purpose', 'Explore'). Tasks with agentType can be started via TaskExecute." })),
+        metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
+      }), { description: "Tasks to create", minItems: 1 }),
     }),
 
     execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       autoClear.resetBatchCountdown();
-      const meta = params.metadata ?? {};
-      if (params.agentType) meta.agentType = params.agentType;
-      const task = addTask(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined);
+      if (!Array.isArray(params.tasks) || params.tasks.length === 0) {
+        return Promise.resolve(textResult("TaskCreate requires a non-empty tasks array"));
+      }
+      const tasks = addTasks(params.tasks.map((item: any) => {
+        const meta = { ...(item.metadata ?? {}) };
+        if (item.agentType) meta.agentType = item.agentType;
+        return {
+          subject: item.subject,
+          description: item.description,
+          activeForm: item.activeForm,
+          metadata: Object.keys(meta).length > 0 ? meta : undefined,
+        };
+      }));
       widget.update();
-      return Promise.resolve(textResult(`Task #${task.id} created successfully: ${task.subject}`));
+      const noun = tasks.length === 1 ? "task" : "tasks";
+      return Promise.resolve(textResult(`Created ${tasks.length} ${noun}:\n${tasks.map(task => `#${task.id} ${task.subject}`).join("\n")}`));
     },
   });
 
