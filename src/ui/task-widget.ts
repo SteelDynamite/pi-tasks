@@ -83,6 +83,16 @@ export class TaskWidget {
     this.uiCtx = ctx;
   }
 
+  /** Clear runtime-only active spinner state. */
+  clearActiveTasks() {
+    this.activeTaskIds.clear();
+    this.metrics.clear();
+    if (this.widgetInterval) {
+      clearInterval(this.widgetInterval);
+      this.widgetInterval = undefined;
+    }
+  }
+
   /** Add or remove a task from the active spinner set. */
   setActiveTask(taskId: string | undefined, active = true) {
     if (taskId && active) {

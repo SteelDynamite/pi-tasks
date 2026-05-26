@@ -15,14 +15,16 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, formatSize, truncateHead, truncateTail } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { AutoClearManager } from "./auto-clear.js";
 import { ProcessTracker } from "./process-tracker.js";
 import { TaskStore } from "./task-store.js";
-import { loadTasksConfig } from "./tasks-config.js";
+import { loadTasksConfig, type TasksConfig } from "./tasks-config.js";
+import type { TaskStoreData } from "./types.js";
 import { openSettingsMenu } from "./ui/settings-menu.js";
 import { TaskWidget, type UICtx } from "./ui/task-widget.js";
 
@@ -61,31 +63,125 @@ const SYSTEM_REMINDER = `<system-reminder>
 The task tools haven't been used recently. If you're working on tasks that would benefit from tracking progress, consider using TaskCreate to add new tasks and TaskUpdate to update task status (set to in_progress when starting, completed when done). Also consider cleaning up the task list if it has become stale. Only use these if relevant to the current work. This is just a gentle reminder - ignore if not applicable. Make sure that you NEVER mention this reminder to the user
 </system-reminder>`;
 
-export default function (pi: ExtensionAPI) {
-  // Initialize store and config
-  const cfg = loadTasksConfig();
-  const piTasks = process.env.PI_TASKS;
-  const taskScope = cfg.taskScope ?? "session";
+const SESSION_STATE_CUSTOM_TYPE = "pi-tasks";
 
-  /** Resolve the task store path from env/config (without session ID). */
-  function resolveStorePath(sessionId?: string): string | undefined {
-    if (piTasks === "off") return undefined;
-    if (piTasks?.startsWith("/")) return piTasks;
-    if (piTasks?.startsWith(".")) return resolve(piTasks);
-    if (piTasks) return piTasks;
-    if (taskScope === "memory") return undefined;
-    if (taskScope === "session" && sessionId) {
-      return join(process.cwd(), ".pi", "tasks", `tasks-${sessionId}.json`);
-    }
-    if (taskScope === "session") return undefined; // no session ID yet, start in-memory
-    return join(process.cwd(), ".pi", "tasks", "tasks.json");
+type StoreMode = "memory" | "session" | "file";
+
+type PersistedTaskState = TaskStoreData & { version?: 1 };
+
+function isTaskStoreData(data: unknown): data is TaskStoreData {
+  const maybe = data as Partial<TaskStoreData> | undefined;
+  return !!maybe && typeof maybe === "object" &&
+    typeof maybe.nextId === "number" && Array.isArray(maybe.tasks);
+}
+
+export default function (pi: ExtensionAPI) {
+  // Initialize store and config lazily from ExtensionContext.cwd.
+  const piTasks = process.env.PI_TASKS;
+  let cfg: TasksConfig = {};
+  let taskScope: NonNullable<TasksConfig["taskScope"]> = "session";
+  let storeMode: StoreMode = "session";
+
+  /** Resolve storage backend. Default session storage uses Pi session custom entries, not project files. */
+  function resolveStoreMode(): StoreMode {
+    if (piTasks === "off") return "memory";
+    if (piTasks) return "file";
+    if (taskScope === "memory") return "memory";
+    if (taskScope === "project") return "file";
+    return "session";
   }
 
-  // For project scope (or env override), create store immediately.
-  // For session scope, start with in-memory and upgrade once we have the session ID.
-  let store = new TaskStore(resolveStorePath());
+  function refreshConfig(cwd: string): void {
+    cfg = loadTasksConfig(cwd);
+    taskScope = cfg.taskScope ?? "session";
+    storeMode = resolveStoreMode();
+  }
+
+  /** Resolve explicit/shared file store path. */
+  function resolveFileStorePath(cwd: string): string | undefined {
+    if (piTasks === "off") return undefined;
+    if (piTasks && isAbsolute(piTasks)) return piTasks;
+    if (piTasks?.startsWith(".")) return resolve(cwd, piTasks);
+    if (piTasks) return piTasks;
+    if (taskScope === "project") return join(cwd, ".pi", "tasks", "tasks.json");
+    return undefined;
+  }
+
+  let store = new TaskStore();
   const tracker = new ProcessTracker();
   const widget = new TaskWidget(store);
+
+  function persistSessionState(): void {
+    if (storeMode !== "session" || typeof pi.appendEntry !== "function") return;
+    pi.appendEntry<PersistedTaskState>(SESSION_STATE_CUSTOM_TYPE, {
+      version: 1,
+      ...store.snapshot(),
+    });
+  }
+
+  function addTask(...args: Parameters<TaskStore["create"]>) {
+    const task = store.create(...args);
+    persistSessionState();
+    return task;
+  }
+
+  function updateTask(...args: Parameters<TaskStore["update"]>) {
+    const result = store.update(...args);
+    if (result.changedFields.length > 0) persistSessionState();
+    return result;
+  }
+
+  function clearAllTasks() {
+    const count = store.clearAll();
+    if (count > 0) persistSessionState();
+    return count;
+  }
+
+  function clearCompletedTasks() {
+    const count = store.clearCompleted();
+    if (count > 0) persistSessionState();
+    return count;
+  }
+
+  function getLegacySessionFilePath(ctx: ExtensionContext): string {
+    return join(ctx.cwd ?? process.cwd(), ".pi", "tasks", `tasks-${ctx.sessionManager.getSessionId()}.json`);
+  }
+
+  function restoreSessionStore(ctx: ExtensionContext): void {
+    if (storeMode !== "session") return;
+
+    let snapshot: TaskStoreData | undefined;
+    for (const entry of ctx.sessionManager.getBranch()) {
+      if (entry.type === "custom" && entry.customType === SESSION_STATE_CUSTOM_TYPE && isTaskStoreData(entry.data)) {
+        snapshot = entry.data;
+      }
+    }
+
+    if (snapshot) {
+      store.loadSnapshot(snapshot);
+      widget.clearActiveTasks();
+      widget.setStore(store);
+      return;
+    }
+
+    // One-time compatibility: import old per-session file if it exists. This check does not create .pi.
+    const legacyPath = getLegacySessionFilePath(ctx);
+    if (existsSync(legacyPath)) {
+      const legacyStore = new TaskStore(legacyPath);
+      const legacySnapshot = legacyStore.snapshot();
+      if (legacySnapshot.tasks.length > 0) {
+        store.loadSnapshot(legacySnapshot);
+        widget.clearActiveTasks();
+        widget.setStore(store);
+        persistSessionState();
+        return;
+      }
+    }
+
+    store.loadSnapshot({ nextId: 1, tasks: [] });
+    widget.clearActiveTasks();
+    widget.setStore(store);
+  }
 
   // ── Subagent integration state ──
   /** Latest ExtensionContext — refreshed on every tool execution so cascade always has a valid one. */
@@ -94,6 +190,30 @@ export default function (pi: ExtensionAPI) {
   let cascadeConfig: { additionalContext?: string; model?: string; maxTurns?: number } | undefined;
   /** Maps agent IDs to task IDs for O(1) completion lookup. */
   const agentTaskMap = new Map<string, string>();
+
+  function rehydrateAgentTaskMap(): void {
+    agentTaskMap.clear();
+    for (const task of store.list()) {
+      const agentId = task.metadata?.agentId;
+      if (task.status === "in_progress" && typeof agentId === "string" && agentId) {
+        agentTaskMap.set(agentId, task.id);
+      }
+    }
+  }
+
+  function resolveTaskIdForAgent(agentId: string): string | undefined {
+    const mapped = agentTaskMap.get(agentId);
+    if (mapped) return mapped;
+
+    for (const task of store.list()) {
+      const storedAgentId = task.metadata?.agentId;
+      if (task.status === "in_progress" && typeof storedAgentId === "string" &&
+        (storedAgentId === agentId || storedAgentId.startsWith(agentId))) {
+        agentTaskMap.set(storedAgentId, task.id);
+        return task.id;
+      }
+    }
+  }
 
   // ── Subagent RPC helpers ──
 
@@ -208,13 +328,13 @@ export default function (pi: ExtensionAPI) {
   // Success → mark task completed, cascade if enabled
   pi.events.on("subagents:completed", async (data) => {
     const { id, result } = data as { id: string; result?: string };
-    const taskId = agentTaskMap.get(id);
+    const taskId = resolveTaskIdForAgent(id);
     if (!taskId) return;
     agentTaskMap.delete(id);
     const task = store.get(taskId);
     if (!task) return;
 
-    store.update(task.id, { status: "completed", metadata: { ...task.metadata, result } });
+    updateTask(task.id, { status: "completed", metadata: { ...task.metadata, result } });
     widget.setActiveTask(task.id, false);
 
     // Auto-cascade: find unblocked dependents with agentType
@@ -226,7 +346,7 @@ export default function (pi: ExtensionAPI) {
         t.blockedBy.every(depId => store.get(depId)?.status === "completed")
       );
       for (const next of unblocked) {
-        store.update(next.id, { status: "in_progress" });
+        updateTask(next.id, { status: "in_progress" });
         const prompt = buildTaskPrompt(next, cascadeConfig.additionalContext);
         try {
           const agentId = await spawnSubagent(next.metadata.agentType, prompt, {
@@ -236,10 +356,10 @@ export default function (pi: ExtensionAPI) {
             ...(cascadeConfig.model ? { model: cascadeConfig.model } : {}),
           });
           agentTaskMap.set(agentId, next.id);
-          store.update(next.id, { owner: agentId, metadata: { ...next.metadata, agentId } });
+          updateTask(next.id, { owner: agentId, metadata: { ...next.metadata, agentId } });
           widget.setActiveTask(next.id);
         } catch (err: any) {
-          store.update(next.id, { status: "pending", metadata: { ...next.metadata, lastError: err.message } });
+          updateTask(next.id, { status: "pending", metadata: { ...next.metadata, lastError: err.message } });
         }
       }
     }
@@ -251,7 +371,7 @@ export default function (pi: ExtensionAPI) {
   // Intentional stop (status === "stopped") → mark completed, preserve partial result
   pi.events.on("subagents:failed", (data) => {
     const { id, error, result, status } = data as { id: string; error?: string; result?: string; status: string };
-    const taskId = agentTaskMap.get(id);
+    const taskId = resolveTaskIdForAgent(id);
     if (!taskId) return;
     agentTaskMap.delete(id);
     const task = store.get(taskId);
@@ -259,32 +379,33 @@ export default function (pi: ExtensionAPI) {
 
     if (status === "stopped") {
       // Intentional stop — mark completed, preserve partial result
-      store.update(task.id, { status: "completed", metadata: { ...task.metadata, result: result || task.metadata?.result } });
+      updateTask(task.id, { status: "completed", metadata: { ...task.metadata, result: result || task.metadata?.result } });
       autoClear.trackCompletion(task.id, currentTurn);
     } else {
       // Actual error — revert to pending
-      store.update(task.id, { status: "pending", metadata: { ...task.metadata, lastError: error || status } });
+      updateTask(task.id, { status: "pending", metadata: { ...task.metadata, lastError: error || status } });
       autoClear.resetBatchCountdown();
     }
     widget.setActiveTask(task.id, false);
     widget.update();
   });
 
-  // ── Session-scoped store upgrade ──
-  // For session scope, the store starts in-memory (no session ID at init time).
-  // Upgrade to file-backed on first context arrival (turn_start, before_agent_start,
-  // or tool_execution_start — whichever fires first).
-  let storeUpgraded = false;
+  // ── Session-entry restore ──
+  let storeRestored = false;
   let persistedTasksShown = false;
-  function upgradeStoreIfNeeded(ctx: ExtensionContext) {
-    if (storeUpgraded) return;
-    if (taskScope === "session" && !piTasks) {
-      const sessionId = ctx.sessionManager.getSessionId();
-      const path = resolveStorePath(sessionId);
-      store = new TaskStore(path);
-      widget.setStore(store);
-    }
-    storeUpgraded = true;
+
+  function restoreStoreIfNeeded(ctx: ExtensionContext, force = false) {
+    if (storeRestored && !force) return;
+
+    const cwd = ctx.cwd ?? process.cwd();
+    refreshConfig(cwd);
+    store = new TaskStore(storeMode === "file" ? resolveFileStorePath(cwd) : undefined);
+    widget.clearActiveTasks();
+    widget.setStore(store);
+
+    if (storeMode === "session") restoreSessionStore(ctx);
+    rehydrateAgentTaskMap();
+    storeRestored = true;
   }
 
   /** Restore widget on session start/resume if there's unfinished work.
@@ -297,8 +418,7 @@ export default function (pi: ExtensionAPI) {
     const tasks = store.list();
     if (tasks.length > 0) {
       if (!isResume && tasks.every(t => t.status === "completed")) {
-        store.clearCompleted();
-        if (taskScope === "session") store.deleteFileIfEmpty();
+        clearCompletedTasks();
       } else {
         widget.update();
       }
@@ -314,8 +434,11 @@ export default function (pi: ExtensionAPI) {
     currentTurn++;
     latestCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
-    upgradeStoreIfNeeded(ctx);
-    if (autoClear.onTurnStart(currentTurn)) widget.update();
+    restoreStoreIfNeeded(ctx);
+    if (autoClear.onTurnStart(currentTurn)) {
+      persistSessionState();
+      widget.update();
+    }
   });
 
   // ── Token usage tracking ──
@@ -359,7 +482,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (_event, ctx) => {
     latestCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
-    upgradeStoreIfNeeded(ctx);
+    restoreStoreIfNeeded(ctx);
     showPersistedTasks();
     if (pendingWarning) {
       ctx.ui.notify(pendingWarning, "warning");
@@ -375,19 +498,23 @@ export default function (pi: ExtensionAPI) {
 
     const isResume = event.reason === "resume";
 
-    storeUpgraded = false;
+    storeRestored = false;
     persistedTasksShown = false;
     currentTurn = 0;
     lastTaskToolUseTurn = 0;
     reminderInjectedThisCycle = false;
     autoClear.reset();
 
-    if (!isResume && taskScope === "memory") {
-      store.clearAll();
-    }
-
-    upgradeStoreIfNeeded(ctx);
+    restoreStoreIfNeeded(ctx, true);
+    if (!isResume && taskScope === "memory") clearAllTasks();
     showPersistedTasks(isResume);
+  });
+
+  pi.on("session_tree", async (_event, ctx) => {
+    latestCtx = ctx;
+    widget.setUICtx(ctx.ui as UICtx);
+    restoreStoreIfNeeded(ctx, true);
+    widget.update();
   });
 
   pi.on("session_shutdown", async () => {
@@ -398,7 +525,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_execution_start", async (_event, ctx) => {
     latestCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
-    upgradeStoreIfNeeded(ctx);
+    restoreStoreIfNeeded(ctx);
     widget.update();
   });
 
@@ -467,7 +594,7 @@ All tasks are created with status \`pending\`.
       autoClear.resetBatchCountdown();
       const meta = params.metadata ?? {};
       if (params.agentType) meta.agentType = params.agentType;
-      const task = store.create(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined);
+      const task = addTask(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined);
       widget.update();
       return Promise.resolve(textResult(`Task #${task.id} created successfully: ${task.subject}`));
     },
@@ -711,7 +838,7 @@ Set up task dependencies:
 
     execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { taskId, ...fields } = params;
-      const { task, changedFields, warnings } = store.update(taskId, fields);
+      const { task, changedFields, warnings } = updateTask(taskId, fields);
 
       if (changedFields.length === 0 && !task) {
         return Promise.resolve(textResult(`Task #${taskId} not found`));
@@ -848,7 +975,7 @@ Set up task dependencies:
         }
         const task = store.get(resolvedId);
         if (task?.metadata?.agentId && task.status === "in_progress") {
-          store.update(taskId, { status: "completed" });
+          updateTask(taskId, { status: "completed" });
           autoClear.trackCompletion(taskId, currentTurn);
           await stopSubagent(task.metadata.agentId);
           widget.setActiveTask(taskId, false);
@@ -858,7 +985,7 @@ Set up task dependencies:
         throw new Error(`No running background process for task ${taskId}`);
       }
 
-      store.update(taskId, { status: "completed" });
+      updateTask(taskId, { status: "completed" });
       autoClear.trackCompletion(taskId, currentTurn);
       widget.setActiveTask(taskId, false);
       widget.update();
@@ -934,7 +1061,7 @@ Set up task dependencies:
         }
 
         // Mark in_progress and spawn agent via RPC
-        store.update(taskId, { status: "in_progress" });
+        updateTask(taskId, { status: "in_progress" });
         const prompt = buildTaskPrompt(task, params.additional_context);
         try {
           const agentId = await spawnSubagent(task.metadata.agentType, prompt, {
@@ -944,12 +1071,12 @@ Set up task dependencies:
             ...(params.model ? { model: params.model } : {}),
           });
           agentTaskMap.set(agentId, taskId);
-          store.update(taskId, { owner: agentId, metadata: { ...task.metadata, agentId } });
+          updateTask(taskId, { owner: agentId, metadata: { ...task.metadata, agentId } });
           widget.setActiveTask(taskId);
           launched.push(`#${taskId} → agent ${agentId}`);
         } catch (err: any) {
           debug(`spawn:error task=#${taskId}`, err);
-          store.update(taskId, { status: "pending" });
+          updateTask(taskId, { status: "pending" });
           results.push(`#${taskId}: spawn failed — ${err.message}`);
         }
       }
@@ -1009,13 +1136,11 @@ Set up task dependencies:
         } else if (choice === "Settings") {
           await settingsMenu();
         } else if (choice.startsWith("Clear completed")) {
-          store.clearCompleted();
-          if (taskScope === "session") store.deleteFileIfEmpty();
+          clearCompletedTasks();
           widget.update();
           await mainMenu();
         } else if (choice.startsWith("Clear all")) {
-          store.clearAll();
-          if (taskScope === "session") store.deleteFileIfEmpty();
+          clearAllTasks();
           widget.update();
           await mainMenu();
         }
@@ -1069,18 +1194,18 @@ Set up task dependencies:
         const action = await ui.select(title, actions);
 
         if (action === "▸ Start (in_progress)") {
-          store.update(taskId, { status: "in_progress" });
+          updateTask(taskId, { status: "in_progress" });
           widget.setActiveTask(taskId);
           widget.update();
           return viewTasks();
         } else if (action === "✓ Complete") {
-          store.update(taskId, { status: "completed" });
+          updateTask(taskId, { status: "completed" });
           autoClear.trackCompletion(taskId, currentTurn);
           widget.setActiveTask(taskId, false);
           widget.update();
           return viewTasks();
         } else if (action === "✗ Delete") {
-          store.update(taskId, { status: "deleted" });
+          updateTask(taskId, { status: "deleted" });
           widget.setActiveTask(taskId, false);
           widget.update();
           return viewTasks();
@@ -1089,7 +1214,7 @@ Set up task dependencies:
       };
 
       const settingsMenu = (): Promise<void> =>
-        openSettingsMenu(ui, cfg, mainMenu, AUTO_CLEAR_DELAY);
+        openSettingsMenu(ui, cfg, mainMenu, AUTO_CLEAR_DELAY, ctx.cwd ?? process.cwd());
 
       const createTask = async (): Promise<void> => {
         const subject = await ui.input("Task subject");
@@ -1097,7 +1222,7 @@ Set up task dependencies:
         const description = await ui.input("Task description");
         if (!description) return mainMenu();
 
-        store.create(subject, description);
+        addTask(subject, description);
         widget.update();
         return mainMenu();
       };

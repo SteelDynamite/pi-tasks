@@ -26,6 +26,7 @@ export async function openSettingsMenu(
   cfg: TasksConfig,
   onBack: () => Promise<void>,
   clearDelayTurns: number,
+  cwd: string,
 ): Promise<void> {
   await ui.custom((_tui, theme, _kb, done) => {
     const items: SettingItem[] = [
@@ -34,8 +35,8 @@ export async function openSettingsMenu(
         label: "Task storage",
         description:
           "memory: tasks live only in memory, lost when session ends. " +
-          "session: persisted per session (tasks-<sessionId>.json), survives resume. " +
-          "project: shared across all sessions (tasks.json). " +
+          "session: persisted inside the Pi session file, survives resume, does not create project .pi. " +
+          "project: shared across all sessions (<cwd>/.pi/tasks/tasks.json). " +
           "Takes effect on next session start.",
         currentValue: cfg.taskScope ?? "session",
         values: ["memory", "session", "project"],
@@ -62,6 +63,8 @@ export async function openSettingsMenu(
       },
     ];
 
+    const persist = () => saveTasksConfig(cfg, cwd);
+
     const list = new SettingsList(
       items,
       /* maxVisible */ 10,
@@ -69,15 +72,15 @@ export async function openSettingsMenu(
       /* onChange */ (id, newValue) => {
         if (id === "autoCascade") {
           cfg.autoCascade = newValue === "on";
-          saveTasksConfig(cfg);
+          persist();
         }
         if (id === "taskScope") {
           cfg.taskScope = newValue as "memory" | "session" | "project";
-          saveTasksConfig(cfg);
+          persist();
         }
         if (id === "autoClearCompleted") {
           cfg.autoClearCompleted = newValue as TasksConfig["autoClearCompleted"];
-          saveTasksConfig(cfg);
+          persist();
         }
       },
       /* onCancel */ () => done(undefined),

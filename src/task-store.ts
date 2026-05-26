@@ -1,14 +1,23 @@
 /**
- * task-store.ts — File-backed task store with CRUD, dependency management, and file locking.
+ * task-store.ts — Task store with CRUD, dependency management, snapshots, and optional file locking.
  *
- * Session-scoped (default): in-memory Map — no disk I/O.
- * Shared (PI_TASK_LIST_ID set): ~/.pi/tasks/<listId>.json with file locking.
+ * Default session scope: in-memory Map persisted by index.ts into Pi session custom entries.
+ * Explicit/shared file scopes: JSON file with file locking.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import type { Task, TaskStatus, TaskStoreData } from "./types.js";
+
+function cloneTask(task: Task): Task {
+  return {
+    ...task,
+    metadata: { ...task.metadata },
+    blocks: [...task.blocks],
+    blockedBy: [...task.blockedBy],
+  };
+}
 
 const TASKS_DIR = join(homedir(), ".pi", "tasks");
 const LOCK_RETRY_MS = 50;
@@ -66,6 +75,40 @@ export class TaskStore {
     this.filePath = filePath;
     this.lockPath = filePath + ".lock";
     this.load();
+  }
+
+  /** Export an in-memory snapshot for session-entry persistence. */
+  snapshot(): TaskStoreData {
+    return {
+      nextId: this.nextId,
+      tasks: Array.from(this.tasks.values()).map(cloneTask),
+    };
+  }
+
+  /** Replace in-memory state from a snapshot. Does not write to disk. */
+  loadSnapshot(data?: Partial<TaskStoreData>): void {
+    this.tasks.clear();
+    this.nextId = Number.isFinite(data?.nextId) ? Math.max(1, Number(data?.nextId)) : 1;
+
+    if (!Array.isArray(data?.tasks)) return;
+
+    let maxId = 0;
+    for (const task of data.tasks) {
+      if (!task?.id) continue;
+      const cloned: Task = {
+        ...task,
+        status: task.status ?? "pending",
+        metadata: { ...(task.metadata ?? {}) },
+        blocks: Array.isArray(task.blocks) ? [...task.blocks] : [],
+        blockedBy: Array.isArray(task.blockedBy) ? [...task.blockedBy] : [],
+        createdAt: task.createdAt ?? Date.now(),
+        updatedAt: task.updatedAt ?? Date.now(),
+      };
+      this.tasks.set(cloned.id, cloned);
+      maxId = Math.max(maxId, Number(cloned.id) || 0);
+    }
+
+    this.nextId = Math.max(this.nextId, maxId + 1);
   }
 
   /** Read store from disk (file-backed mode only). */

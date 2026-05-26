@@ -185,10 +185,10 @@ Task storage is controlled by the `taskScope` setting (`/tasks` → Settings →
 | Mode | File | Behaviour |
 |------|------|-----------|
 | `memory` | *(none)* | In-memory only — tasks lost when session ends |
-| `session` **(default)** | `<cwd>/.pi/tasks/tasks-<sessionId>.json` | Per-session file — isolated between sessions, survives resume |
+| `session` **(default)** | Pi session custom entries (`~/.pi/agent/sessions/...`) | Per-session state — isolated between sessions, branch-aware, survives resume, does not create project `.pi` |
 | `project` | `<cwd>/.pi/tasks/tasks.json` | Shared across all sessions in the project |
 
-On new session start, if all persisted tasks are completed they are auto-cleared for a clean slate. On session resume, all tasks (including completed) are shown so the user can review progress. Empty session files are automatically deleted when all tasks are cleared.
+On new session start, if all persisted tasks are completed they are auto-cleared for a clean slate. On session resume, all tasks (including completed) are shown so the user can review progress. Session-scoped tasks are stored as append-only extension state in Pi's existing session JSONL and are not sent to the LLM.
 
 ### Auto-clear completed tasks
 
@@ -202,7 +202,7 @@ The `autoClearCompleted` setting controls automatic cleanup of completed tasks:
 
 Both auto-clear modes use a turn-based delay for non-jarring UX — tasks linger briefly so you see the completion before they disappear.
 
-Settings (`taskScope`, `autoCascade`, `autoClearCompleted`) are saved to `<cwd>/.pi/tasks-config.json`.
+Settings (`taskScope`, `autoCascade`, `autoClearCompleted`) are saved to `<cwd>/.pi/tasks-config.json` only when changed via `/tasks` → Settings.
 
 ### Override via environment variables
 
@@ -212,7 +212,7 @@ Settings (`taskScope`, `autoCascade`, `autoClearCompleted`) are saved to `<cwd>/
 | `PI_TASKS` | `sprint-1` | Named shared list at `~/.pi/tasks/sprint-1.json` |
 | `PI_TASKS` | `/abs/path/tasks.json` | Explicit absolute file path |
 | `PI_TASKS` | `./tasks.json` | Relative path resolved from cwd |
-| *(unset)* | | Uses `taskScope` setting (default: `session`) |
+| *(unset)* | | Uses `taskScope` setting (default: session entries) |
 | `PI_TASKS_DEBUG` | `1` | Trace RPC communication (request/reply/timeout) and spawn errors to stderr |
 
 Named and explicit paths use a file-locked store with stale-lock detection — safe for multiple pi sessions coordinating on the same task list.
@@ -244,7 +244,7 @@ Tasks
 - **Create task** — input prompts for subject and description
 - **Clear completed** — remove all completed tasks
 - **Clear all** — remove all tasks regardless of status
-- **Settings** — configure task storage, auto-cascade, and auto-clear completed tasks (saved to `tasks-config.json`)
+- **Settings** — configure task storage, auto-cascade, and auto-clear completed tasks (writes `tasks-config.json` only when changed)
 
 ## Cross-extension Communication with [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents)
 
@@ -302,9 +302,9 @@ If [`pi-subagents`](https://github.com/tintinweb/pi-subagents) is not installed,
 src/
 ├── index.ts            # Extension entry: 7 tools + /tasks command + widget + subagent integration
 ├── types.ts            # Task, TaskStatus, BackgroundProcess types
-├── task-store.ts       # File-backed store with CRUD, dependencies, locking
+├── task-store.ts       # Task store with CRUD, dependencies, snapshots, optional file locking
 ├── auto-clear.ts       # Turn-based auto-clearing of completed tasks (AutoClearManager)
-├── tasks-config.ts     # Config persistence (taskScope, autoCascade, autoClearCompleted) → .pi/tasks-config.json
+├── tasks-config.ts     # Config persistence (taskScope, autoCascade, autoClearCompleted) → .pi/tasks-config.json when settings are changed
 ├── process-tracker.ts  # Background process output buffering and stop
 └── ui/
     ├── task-widget.ts  # Persistent widget with status icons and spinner
@@ -320,7 +320,7 @@ src/
 ```bash
 npm install
 npm run typecheck   # TypeScript validation
-npm test            # Run unit tests (145 tests)
+npm test            # Run unit tests (153 tests)
 ```
 
 ## License

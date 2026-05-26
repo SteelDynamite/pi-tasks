@@ -1,4 +1,4 @@
-// <cwd>/.pi/tasks-config.json — persists extension settings across sessions
+// <cwd>/.pi/tasks-config.json — persists extension settings after /tasks Settings changes
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -9,15 +9,18 @@ export interface TasksConfig {
   autoClearCompleted?: "never" | "on_list_complete" | "on_task_complete";  // default: "on_list_complete"
 }
 
-const CONFIG_PATH = join(process.cwd(), ".pi", "tasks-config.json");
+function configPath(cwd: string): string {
+  return join(cwd, ".pi", "tasks-config.json");
+}
 
-export function loadTasksConfig(): TasksConfig {
+export function loadTasksConfig(cwd: string = process.cwd()): TasksConfig {
   try {
-    return JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+    return JSON.parse(readFileSync(configPath(cwd), "utf-8"));
   } catch { return {}; }
 }
 
-export function saveTasksConfig(config: TasksConfig): void {
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+export function saveTasksConfig(config: TasksConfig, cwd: string = process.cwd()): void {
+  const path = configPath(cwd);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(config, null, 2));
 }

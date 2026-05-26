@@ -29,6 +29,18 @@ describe("TaskStore (in-memory)", () => {
     expect(t.metadata).toEqual({ key: "value" });
   });
 
+  it("exports and restores snapshots", () => {
+    store.create("Task", "Desc", "Running task", { key: "value" });
+    store.update("1", { status: "in_progress" });
+
+    const restored = new TaskStore();
+    restored.loadSnapshot(store.snapshot());
+
+    expect(restored.get("1")!.subject).toBe("Task");
+    expect(restored.get("1")!.status).toBe("in_progress");
+    expect(restored.create("Next", "Desc").id).toBe("2");
+  });
+
   it("gets a task by ID", () => {
     store.create("Test", "Desc");
     const task = store.get("1");
