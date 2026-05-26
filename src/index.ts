@@ -325,6 +325,28 @@ export default function (pi: ExtensionAPI) {
   // ── Subagent completion listener ──
   // Listens for subagent lifecycle events to update task status and optionally cascade.
 
+  function markTaskStopped(taskId: string, stopReason: string) {
+    const task = store.get(taskId);
+    if (!task || task.status !== "in_progress") return false;
+    updateTask(task.id, {
+      status: "stopped",
+      metadata: { ...task.metadata, stoppedAt: Date.now(), stopReason },
+    });
+    widget.setActiveTask(task.id, false);
+    autoClear.resetBatchCountdown();
+    return true;
+  }
+
+  function stopInProgressTasksForAbortedTurn() {
+    let changed = false;
+    for (const task of store.list()) {
+      if (task.status === "in_progress" && !task.metadata?.agentId) {
+        changed = markTaskStopped(task.id, "aborted") || changed;
+      }
+    }
+    if (changed) widget.update();
+  }
+
   // Success → mark task completed, cascade if enabled
   pi.events.on("subagents:completed", async (data) => {
     const { id, result } = data as { id: string; result?: string };
@@ -368,7 +390,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Failure → store error, revert to pending, don't cascade (branch stops)
-  // Intentional stop (status === "stopped") → mark completed, preserve partial result
+  // Intentional stop (status === "stopped") → mark stopped, preserve partial result
   pi.events.on("subagents:failed", (data) => {
     const { id, error, result, status } = data as { id: string; error?: string; result?: string; status: string };
     const taskId = resolveTaskIdForAgent(id);
@@ -378,9 +400,9 @@ export default function (pi: ExtensionAPI) {
     if (!task) return;
 
     if (status === "stopped") {
-      // Intentional stop — mark completed, preserve partial result
-      updateTask(task.id, { status: "completed", metadata: { ...task.metadata, result: result || task.metadata?.result } });
-      autoClear.trackCompletion(task.id, currentTurn);
+      // Intentional stop — mark stopped, preserve partial result
+      markTaskStopped(task.id, "subagent_stopped");
+      if (result) updateTask(task.id, { metadata: { ...task.metadata, result } });
     } else {
       // Actual error — revert to pending
       updateTask(task.id, { status: "pending", metadata: { ...task.metadata, lastError: error || status } });
@@ -447,6 +469,16 @@ export default function (pi: ExtensionAPI) {
     const msg = event.message as any;
     if (msg?.role === "assistant" && msg.usage) {
       widget.addTokenUsage(msg.usage.input ?? 0, msg.usage.output ?? 0);
+    }
+    if (msg?.role === "assistant" && msg.stopReason === "aborted") {
+      stopInProgressTasksForAbortedTurn();
+    }
+  });
+
+  pi.on("message_end", async (event) => {
+    const msg = event.message as any;
+    if (msg?.role === "assistant" && msg.stopReason === "aborted") {
+      stopInProgressTasksForAbortedTurn();
     }
   });
 
@@ -622,7 +654,7 @@ All tasks are created with status \`pending\`.
 Returns a summary of each task:
 - **id**: Task identifier (use with TaskGet, TaskUpdate)
 - **subject**: Brief description of the task
-- **status**: 'pending', 'in_progress', or 'completed'
+- **status**: 'pending', 'in_progress', 'stopped', or 'completed'
 - **owner**: Agent ID if assigned, empty if available
 - **blockedBy**: List of open task IDs that must be resolved first (tasks with blockedBy cannot be claimed until dependencies resolve)
 
@@ -633,8 +665,8 @@ Use TaskGet with a specific task ID to view full details including description a
       const tasks = store.list();
       if (tasks.length === 0) return Promise.resolve(textResult("No tasks found"));
 
-      // Sort: pending first (by ID), then in_progress (by ID), then completed (by ID)
-      const statusOrder: Record<string, number> = { pending: 0, in_progress: 1, completed: 2 };
+      // Sort: pending first (by ID), then in_progress, stopped, completed (each by ID)
+      const statusOrder: Record<string, number> = { pending: 0, in_progress: 1, stopped: 2, completed: 3 };
       const sorted = [...tasks].sort((a, b) => {
         const so = (statusOrder[a.status] ?? 0) - (statusOrder[b.status] ?? 0);
         if (so !== 0) return so;
@@ -686,7 +718,7 @@ Use TaskGet with a specific task ID to view full details including description a
 Returns full task details:
 - **subject**: Task title
 - **description**: Detailed requirements and context
-- **status**: 'pending', 'in_progress', or 'completed'
+- **status**: 'pending', 'in_progress', 'stopped', or 'completed'
 - **blocks**: Tasks waiting on this one to complete
 - **blockedBy**: Tasks that must complete before this one can start
 
@@ -788,7 +820,7 @@ Returns full task details:
 
 ## Status Workflow
 
-Status progresses: \`pending\` → \`in_progress\` → \`completed\`
+Status progresses: \`pending\` → \`in_progress\` → \`stopped\` / \`completed\`
 
 Use \`deleted\` to permanently remove a task.
 
@@ -824,7 +856,7 @@ Set up task dependencies:
 \`\`\``,
     parameters: Type.Object({
       taskId: Type.String({ description: "The ID of the task to update" }),
-      status: Type.Optional(StringEnum(["pending", "in_progress", "completed", "deleted"] as const, {
+      status: Type.Optional(StringEnum(["pending", "in_progress", "stopped", "completed", "deleted"] as const, {
         description: "New status for the task",
       })),
       subject: Type.Optional(Type.String({ description: "New subject for the task" })),
@@ -848,7 +880,8 @@ Set up task dependencies:
       if (fields.status === "in_progress") {
         widget.setActiveTask(taskId);
         autoClear.resetBatchCountdown();
-      } else if (fields.status === "pending") {
+      } else if (fields.status === "pending" || fields.status === "stopped") {
+        widget.setActiveTask(taskId, false);
         autoClear.resetBatchCountdown();
       } else if (fields.status === "completed" || fields.status === "deleted") {
         widget.setActiveTask(taskId, false);
@@ -975,19 +1008,15 @@ Set up task dependencies:
         }
         const task = store.get(resolvedId);
         if (task?.metadata?.agentId && task.status === "in_progress") {
-          updateTask(taskId, { status: "completed" });
-          autoClear.trackCompletion(taskId, currentTurn);
+          markTaskStopped(resolvedId, "task_stop");
           await stopSubagent(task.metadata.agentId);
-          widget.setActiveTask(taskId, false);
           widget.update();
           return textResult(`Task #${taskId} stopped successfully`);
         }
         throw new Error(`No running background process for task ${taskId}`);
       }
 
-      updateTask(taskId, { status: "completed" });
-      autoClear.trackCompletion(taskId, currentTurn);
-      widget.setActiveTask(taskId, false);
+      markTaskStopped(taskId, "task_stop");
       widget.update();
       return textResult(`Task #${taskId} stopped successfully`);
     },
@@ -1157,6 +1186,7 @@ Set up task dependencies:
           switch (status) {
             case "completed": return "✔";
             case "in_progress": return "◼";
+            case "stopped": return "■";
             default: return "◻";
           }
         };
@@ -1181,7 +1211,7 @@ Set up task dependencies:
 
         const actions: string[] = [];
 
-        if (task.status === "pending") {
+        if (task.status === "pending" || task.status === "stopped") {
           actions.push("▸ Start (in_progress)");
         }
         if (task.status === "in_progress") {

@@ -4,6 +4,7 @@
  * Display style matches Claude Code's task list:
  *   ✔ completed tasks (strikethrough + dim)
  *   ◼ in_progress tasks
+ *   ■ stopped tasks
  *   ◻ pending tasks
  *   ✳/✽ actively executing task (star spinner with activeForm text)
  */
@@ -136,11 +137,13 @@ export class TaskWidget {
 
     const completed = tasks.filter(t => t.status === "completed");
     const inProgress = tasks.filter(t => t.status === "in_progress");
+    const stopped = tasks.filter(t => t.status === "stopped");
     const pending = tasks.filter(t => t.status === "pending");
 
     const parts: string[] = [];
     if (completed.length > 0) parts.push(`${completed.length} done`);
     if (inProgress.length > 0) parts.push(`${inProgress.length} in progress`);
+    if (stopped.length > 0) parts.push(`${stopped.length} stopped`);
     if (pending.length > 0) parts.push(`${pending.length} open`);
     const statusText = `${tasks.length} tasks (${parts.join(", ")})`;
 
@@ -159,6 +162,8 @@ export class TaskWidget {
         icon = theme.fg("success", "✔");
       } else if (task.status === "in_progress") {
         icon = theme.fg("accent", "◼");
+      } else if (task.status === "stopped") {
+        icon = theme.fg("error", "■");
       } else {
         icon = "◻";
       }

@@ -356,6 +356,21 @@ describe("Completion listener", () => {
     expect(result.content[0].text).toContain("Status: pending");
   });
 
+  it("marks task stopped on subagents:failed stopped event", async () => {
+    await mock.executeTool("TaskCreate", {
+      subject: "Stopped agent task",
+      description: "Desc",
+      agentType: "general-purpose",
+    });
+    await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+
+    mock.emitEvent("subagents:failed", { id: "agent-1", result: "partial", status: "stopped" });
+
+    const result = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(result.content[0].text).toContain("Status: stopped");
+    expect(result.content[0].text).toContain("subagent_stopped");
+  });
+
   it("ignores events for unknown agent IDs", async () => {
     await mock.executeTool("TaskCreate", {
       subject: "Unrelated",
@@ -368,6 +383,45 @@ describe("Completion listener", () => {
 
     const result = await mock.executeTool("TaskGet", { taskId: "1" });
     expect(result.content[0].text).toContain("Status: pending");
+  });
+});
+
+describe("Model abort handling", () => {
+  it("marks in-progress non-agent tasks stopped when assistant turn is aborted", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    await mock.executeTool("TaskCreate", { subject: "Main task", description: "Desc" });
+    await mock.executeTool("TaskUpdate", { taskId: "1", status: "in_progress" });
+
+    await mock.fireLifecycle("turn_end", {
+      message: { role: "assistant", stopReason: "aborted" },
+      toolResults: [],
+    });
+
+    const result = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(result.content[0].text).toContain("Status: stopped");
+    expect(result.content[0].text).toContain("\"stopReason\":\"aborted\"");
+  });
+
+  it("does not stop agent-backed tasks on main model abort", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    await mock.executeTool("TaskCreate", { subject: "Agent task", description: "Desc" });
+    await mock.executeTool("TaskUpdate", {
+      taskId: "1",
+      status: "in_progress",
+      metadata: { agentId: "agent-1" },
+    });
+
+    await mock.fireLifecycle("turn_end", {
+      message: { role: "assistant", stopReason: "aborted" },
+      toolResults: [],
+    });
+
+    const result = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(result.content[0].text).toContain("Status: in_progress");
   });
 });
 

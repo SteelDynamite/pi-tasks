@@ -70,6 +70,14 @@ describe("TaskStore (in-memory)", () => {
     expect(changedFields).toEqual(["status"]);
   });
 
+  it("supports stopped status", () => {
+    store.create("Test", "Desc");
+    const { task, changedFields } = store.update("1", { status: "stopped" });
+
+    expect(task!.status).toBe("stopped");
+    expect(changedFields).toEqual(["status"]);
+  });
+
   it("updates multiple fields at once", () => {
     store.create("Test", "Desc");
     const { changedFields } = store.update("1", {
@@ -301,27 +309,29 @@ describe("TaskStore (in-memory)", () => {
     expect(store.clearCompleted()).toBe(0);
   });
 
-  it("list sorts pending → in_progress → completed with all three present", () => {
+  it("list sorts pending → in_progress → stopped → completed with all statuses present", () => {
     store.create("Pending task", "Desc");
     store.create("Completed task", "Desc");
     store.create("In-progress task", "Desc");
+    store.create("Stopped task", "Desc");
     store.create("Another pending", "Desc");
 
     store.update("2", { status: "completed" });
     store.update("3", { status: "in_progress" });
+    store.update("4", { status: "stopped" });
 
     const tasks = store.list();
     // Store returns by ID; TaskList tool sorts by status group
     // Here we verify the raw list order (by ID), then test status-grouped sort
-    const statusOrder: Record<string, number> = { pending: 0, in_progress: 1, completed: 2 };
+    const statusOrder: Record<string, number> = { pending: 0, in_progress: 1, stopped: 2, completed: 3 };
     const sorted = [...tasks].sort((a, b) => {
       const so = (statusOrder[a.status] ?? 0) - (statusOrder[b.status] ?? 0);
       if (so !== 0) return so;
       return Number(a.id) - Number(b.id);
     });
 
-    expect(sorted.map(t => t.id)).toEqual(["1", "4", "3", "2"]);
-    expect(sorted.map(t => t.status)).toEqual(["pending", "pending", "in_progress", "completed"]);
+    expect(sorted.map(t => t.id)).toEqual(["1", "5", "3", "4", "2"]);
+    expect(sorted.map(t => t.status)).toEqual(["pending", "pending", "in_progress", "stopped", "completed"]);
   });
 });
 

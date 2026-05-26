@@ -89,6 +89,17 @@ describe("TaskWidget", () => {
     expect(lines[1]).toContain("Working on it");
   });
 
+  it("renders stopped tasks with ■ icon", () => {
+    store.create("Stopped task", "Desc");
+    store.update("1", { status: "stopped" });
+    widget.update();
+
+    const lines = renderWidget(ui.state);
+    expect(lines[0]).toContain("1 stopped");
+    expect(lines[1]).toContain("■");
+    expect(lines[1]).toContain("Stopped task");
+  });
+
   it("renders completed tasks with ✔ icon and strikethrough", () => {
     store.create("Done task", "Desc");
     store.update("1", { status: "completed" });

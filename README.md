@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/1d0ee87a-e0a5-4bfa-a9b9-2f9144cb905b
 ## Features
 
 - **7 LLM-callable tools** — `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`, `TaskOutput`, `TaskStop`, `TaskExecute` — matching Claude Code's exact tool specs and descriptions
-- **Persistent widget** — live task list above the editor with `✔`/`◼`/`◻` status icons, task numbers (`#1`, `#2`, …), strikethrough for completed tasks, star spinner (`✳✽`) for active tasks with elapsed time and token counts
+- **Persistent widget** — live task list above the editor with `✔`/`◼`/`■`/`◻` status icons, task numbers (`#1`, `#2`, …), strikethrough for completed tasks, star spinner (`✳✽`) for active tasks with elapsed time and token counts
 - **System-reminder injection** — periodic `<system-reminder>` nudges appended to tool results when task tools haven't been used recently (matches Claude Code's behavior exactly)
 - **Prompt guidelines** — workflow contract encoded in tool descriptions, nudging the LLM at the point of tool use
 - **Dependency management** — bidirectional `blocks`/`blockedBy` relationships with warnings for cycles, self-deps, and dangling references
@@ -105,7 +105,7 @@ Update task fields, status, metadata, and dependencies.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `taskId` | string | Task ID (required) |
-| `status` | `pending` / `in_progress` / `completed` / `deleted` | New status |
+| `status` | `pending` / `in_progress` / `stopped` / `completed` / `deleted` | New status |
 | `subject` | string | New title |
 | `description` | string | New description |
 | `activeForm` | string | Spinner text |
@@ -165,10 +165,11 @@ With **auto-cascade** enabled (via `/tasks` → Settings), completed tasks autom
 
 ```
 pending → in_progress → completed
+                      → stopped
                       → deleted (permanently removed)
 ```
 
-Tasks are created as `pending`. Mark `in_progress` before starting work, `completed` when done. `deleted` removes entirely — IDs never reset.
+Tasks are created as `pending`. Mark `in_progress` before starting work, `completed` when done, and `stopped` when aborted or intentionally stopped. `deleted` removes entirely — IDs never reset.
 
 ## Dependency Management
 

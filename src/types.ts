@@ -2,7 +2,7 @@
  * types.ts — Type definitions for the task management system.
  */
 
-export type TaskStatus = "pending" | "in_progress" | "completed";
+export type TaskStatus = "pending" | "in_progress" | "stopped" | "completed";
 
 export interface Task {
   id: string;
