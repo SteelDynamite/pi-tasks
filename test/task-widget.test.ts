@@ -11,6 +11,14 @@ function mockTheme(): Theme {
   };
 }
 
+function colorMarkerTheme(): Theme {
+  return {
+    fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+    bold: (text: string) => text,
+    strikethrough: (text: string) => `~~${text}~~`,
+  };
+}
+
 /** Create a mock UICtx that captures setWidget calls. */
 function mockUICtx() {
   const state: {
@@ -34,10 +42,9 @@ function mockUICtx() {
 }
 
 /** Render the widget and return its lines. */
-function renderWidget(state: ReturnType<typeof mockUICtx>["state"]): string[] {
+function renderWidget(state: ReturnType<typeof mockUICtx>["state"], theme: Theme = mockTheme()): string[] {
   const entry = state.widgets.get("tasks");
   if (!entry?.content) return [];
-  const theme = mockTheme();
   const tui = { terminal: { columns: 200 }, requestRender() {} };
   const result = entry.content(tui, theme);
   return result.render();
@@ -89,44 +96,51 @@ describe("TaskWidget", () => {
     expect(lines[1]).toContain("Working on it");
   });
 
-  it("renders stopped tasks with ■ icon", () => {
+  it("renders stopped tasks with accent icon and text", () => {
     store.create("Stopped task", "Desc");
     store.update("1", { status: "stopped" });
     widget.update();
 
-    const lines = renderWidget(ui.state);
+    const lines = renderWidget(ui.state, colorMarkerTheme());
     expect(lines[0]).toContain("1 stopped");
-    expect(lines[1]).toContain("■");
-    expect(lines[1]).toContain("Stopped task");
+    expect(lines[1]).toContain("<accent>■</accent>");
+    expect(lines[1]).toContain("<accent>#1 Stopped task</accent>");
   });
 
-  it("renders blocked tasks with ⊘ icon", () => {
+  it("renders blocked tasks with warning icon and text", () => {
     store.create("Blocked task", "Desc");
     store.update("1", { status: "blocked" });
     widget.update();
 
-    const lines = renderWidget(ui.state);
+    const lines = renderWidget(ui.state, colorMarkerTheme());
     expect(lines[0]).toContain("1 blocked");
-    expect(lines[1]).toContain("⊘");
+    expect(lines[1]).toContain("<warning>⊘</warning>");
+    expect(lines[1]).toContain("<warning>#1 Blocked task</warning>");
   });
 
-  it("renders failed tasks with ✗ icon", () => {
+  it("renders failed tasks with error icon and text", () => {
     store.create("Failed task", "Desc");
     store.update("1", { status: "failed" });
     widget.update();
 
-    const lines = renderWidget(ui.state);
+    const lines = renderWidget(ui.state, colorMarkerTheme());
     expect(lines[0]).toContain("1 failed");
-    expect(lines[1]).toContain("✗");
+    expect(lines[1]).toContain("<error>✗</error>");
+    expect(lines[1]).toContain("<error>#1 Failed task</error>");
   });
 
-  it("renders completed tasks with ✓ icon and strikethrough", () => {
+  it("renders completed tasks with green ✓ icon and strikethrough", () => {
     store.create("Done task", "Desc");
     store.update("1", { status: "completed" });
     widget.update();
 
-    const lines = renderWidget(ui.state);
-    expect(lines[1]).toContain("✓");
+    const yellowSuccessTheme: Theme = {
+      fg: (color: string, text: string) => color === "success" ? `\x1b[33m${text}\x1b[39m` : text,
+      bold: (text: string) => text,
+      strikethrough: (text: string) => `~~${text}~~`,
+    };
+    const lines = renderWidget(ui.state, yellowSuccessTheme);
+    expect(lines[1]).toContain("\x1b[32m✓\x1b[39m");
     expect(lines[1]).toContain("~~#1 Done task~~");
   });
 

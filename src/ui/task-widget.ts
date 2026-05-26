@@ -32,6 +32,13 @@ export type UICtx = {
 
 const IN_PROGRESS_FRAMES = ["▹", "▸", "▶", "▸"];
 const MAX_VISIBLE_TASKS = 10;
+const GREEN_FG = "\x1b[32m";
+const RESET_FG = "\x1b[39m";
+
+/** Force terminal-green for the completed checkmark, independent of theme success color. */
+function green(text: string): string {
+  return `${GREEN_FG}${text}${RESET_FG}`;
+}
 
 /** Per-task runtime metrics (elapsed time, token usage). */
 export interface TaskMetrics {
@@ -159,14 +166,14 @@ export class TaskWidget {
 
       let icon: string;
       if (task.status === "completed") {
-        icon = theme.fg("success", "✓");
+        icon = green("✓");
       } else if (task.status === "in_progress") {
         const frame = isActive ? IN_PROGRESS_FRAMES[this.widgetFrame % IN_PROGRESS_FRAMES.length] : "▶";
         icon = theme.fg("accent", frame);
       } else if (task.status === "blocked") {
         icon = theme.fg("warning", "⊘");
       } else if (task.status === "stopped") {
-        icon = theme.fg("error", "■");
+        icon = theme.fg("accent", "■");
       } else if (task.status === "failed") {
         icon = theme.fg("error", "✗");
       } else {
@@ -207,7 +214,16 @@ export class TaskWidget {
         const agentSuffix = task.status === "in_progress" && task.metadata?.agentId
           ? theme.fg("dim", ` (agent ${task.metadata.agentId.slice(0, 5)})`)
           : "";
-        text = `  ${icon} ${theme.fg("dim", "#" + task.id)} ${task.subject}${agentSuffix}`;
+        const label = `#${task.id} ${task.subject}`;
+        if (task.status === "failed") {
+          text = `  ${icon} ${theme.fg("error", label)}${agentSuffix}`;
+        } else if (task.status === "blocked") {
+          text = `  ${icon} ${theme.fg("warning", label)}${agentSuffix}`;
+        } else if (task.status === "stopped") {
+          text = `  ${icon} ${theme.fg("accent", label)}${agentSuffix}`;
+        } else {
+          text = `  ${icon} ${theme.fg("dim", "#" + task.id)} ${task.subject}${agentSuffix}`;
+        }
       }
 
       lines.push(truncate(text + suffix));
