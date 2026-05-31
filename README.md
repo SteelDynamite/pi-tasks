@@ -63,7 +63,7 @@ Create tasks.
 
 ### `TaskList`
 
-List tasks with status, owner, and dependency info.
+List tasks with status and dependency info.
 
 ```text
 #1 [pending] Fix authentication bug
@@ -87,7 +87,7 @@ Dependents: #3
 
 ### `TaskUpdate`
 
-Update task fields, status, owner, and dependencies.
+Update task fields, status, and dependencies.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -95,7 +95,6 @@ Update task fields, status, owner, and dependencies.
 | `status` | `pending` / `in_progress` / `blocked` / `stopped` / `failed` / `completed` / `deleted` | New status |
 | `subject` | string | New title |
 | `description` | string | New description |
-| `owner` | string | Owner name |
 | `addDependents` | string[] | Task IDs that depend on this task |
 | `addDependsOn` | string[] | Task IDs this task depends on |
 

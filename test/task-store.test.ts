@@ -91,16 +91,14 @@ describe("TaskStore (in-memory)", () => {
     const { changedFields } = store.update("1", {
       subject: "Updated subject",
       description: "Updated desc",
-      owner: "agent-1",
     });
 
     expect(changedFields).toContain("subject");
     expect(changedFields).toContain("description");
-    expect(changedFields).toContain("owner");
 
     const task = store.get("1")!;
     expect(task.subject).toBe("Updated subject");
-    expect(task.owner).toBe("agent-1");
+    expect(task.description).toBe("Updated desc");
   });
 
   it("deletes a task with status: deleted", () => {

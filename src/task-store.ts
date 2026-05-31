@@ -100,7 +100,6 @@ export class TaskStore {
         subject: task.subject ?? "",
         description: task.description ?? "",
         status: task.status ?? "pending",
-        owner: task.owner,
         dependents: Array.isArray(task.dependents) ? [...task.dependents] : Array.isArray(task.blocks) ? [...task.blocks] : [],
         dependsOn: Array.isArray(task.dependsOn) ? [...task.dependsOn] : Array.isArray(task.blockedBy) ? [...task.blockedBy] : [],
         createdAt: task.createdAt ?? Date.now(),
@@ -156,7 +155,6 @@ export class TaskStore {
       subject: fields.subject,
       description: fields.description,
       status: "pending",
-      owner: undefined,
       dependents: [],
       dependsOn: [],
       createdAt: now,
@@ -189,7 +187,6 @@ export class TaskStore {
     status?: TaskStatus | "deleted";
     subject?: string;
     description?: string;
-    owner?: string;
     addDependents?: string[];
     addDependsOn?: string[];
     /** Deprecated aliases accepted for old callers. */
@@ -225,10 +222,6 @@ export class TaskStore {
       if (fields.description !== undefined) {
         task.description = fields.description;
         changedFields.push("description");
-      }
-      if (fields.owner !== undefined) {
-        task.owner = fields.owner;
-        changedFields.push("owner");
       }
 
 

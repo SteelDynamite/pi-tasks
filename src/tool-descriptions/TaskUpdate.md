@@ -7,6 +7,7 @@ Use this tool to update a task in the task list.
 - After resolving, call TaskList to find your next task
 
 **Mark tasks as resolved:**
+
 - When you have completed the work described in a task
 - When a task is no longer needed or has been superseded
 - IMPORTANT: Always mark your assigned tasks as resolved when you finish them
@@ -24,21 +25,13 @@ Use this tool to update a task in the task list.
   - You couldn't find necessary files or dependencies
 
 **Delete tasks:**
+
 - When a task is no longer relevant or was created in error
 - Setting status to `deleted` permanently removes the task
 
 **Update task details:**
 - When requirements change or become clearer
 - When establishing dependencies between tasks
-
-## Fields You Can Update
-
-- **status**: The task status (see Status Workflow below)
-- **subject**: Change the task title (imperative form, e.g., "Run tests")
-- **description**: Change the task description
-- **owner**: Change the task owner (agent name)
-- **addDependents**: Mark tasks that depend on this one
-- **addDependsOn**: Mark task dependencies that must complete first
 
 ## Status Workflow
 
@@ -74,10 +67,6 @@ Delete a task:
 {"taskId": "1", "status": "deleted"}
 ```
 
-Claim a task by setting owner:
-```json
-{"taskId": "1", "owner": "my-name"}
-```
 
 Set up task dependencies:
 ```json

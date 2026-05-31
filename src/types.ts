@@ -14,7 +14,6 @@ export interface Task {
   subject: string;
   description: string;
   status: TaskStatus;
-  owner?: string;
   dependents: string[];
   dependsOn: string[];
   createdAt: number;

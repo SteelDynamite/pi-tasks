@@ -401,10 +401,6 @@ export default function (pi: ExtensionAPI) {
       const lines = sorted.map(task => {
         let line = `#${task.id} [${task.status}] ${task.subject}`;
 
-        if (task.owner) {
-          line += ` (${task.owner})`;
-        }
-
         // Only show non-completed dependencies
         if (task.dependsOn.length > 0) {
           const openDependencies = task.dependsOn.filter(bid => {
@@ -446,9 +442,6 @@ export default function (pi: ExtensionAPI) {
         `Task #${task.id}: ${task.subject}`,
         `Status: ${task.status}`,
       ];
-      if (task.owner) {
-        lines.push(`Owner: ${task.owner}`);
-      }
       lines.push(`Description: ${desc}`);
 
       if (task.dependsOn.length > 0) {
@@ -483,7 +476,6 @@ export default function (pi: ExtensionAPI) {
       })),
       subject: Type.Optional(Type.String({ description: "New subject for the task" })),
       description: Type.Optional(Type.String({ description: "New description for the task" })),
-      owner: Type.Optional(Type.String({ description: "New owner for the task" })),
       addDependents: Type.Optional(Type.Array(Type.String(), { description: "Task IDs that depend on this task" })),
       addDependsOn: Type.Optional(Type.Array(Type.String(), { description: "Task IDs this task depends on" })),
     }),
