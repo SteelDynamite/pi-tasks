@@ -1,26 +1,19 @@
 # @tintinweb/pi-tasks
 
-A [pi](https://pi.dev) extension that brings **Claude Code-style task tracking and coordination** to pi. Track multi-step work with structured tasks, dependency management, and a persistent visual widget.
+A [pi](https://pi.dev) extension for structured task tracking: task lists, status, dependencies, persistence, and a visual widget.
 
 > **Status:** Early release.
 
 <img width="600" alt="pi-tasks screenshot" src="https://github.com/tintinweb/pi-tasks/raw/master/media/screenshot.png" />
 
-https://github.com/user-attachments/assets/1d0ee87a-e0a5-4bfa-a9b9-2f9144cb905b
-
-
-
 ## Features
 
-- **7 LLM-callable tools** — `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`, `TaskOutput`, `TaskStop`, `TaskExecute` — Claude Code-style task specs adapted for pi
-- **Persistent widget** — live task list above the editor with `○`/`▶`/`■`/`✓`/`✗`/`⊘` status icons, task numbers (`#1`, `#2`, …), strikethrough for completed tasks, and active task elapsed time/token counts
-- **System-reminder injection** — periodic `<system-reminder>` nudges appended to tool results when task tools haven't been used recently (matches Claude Code's behavior exactly)
-- **Prompt guidelines** — workflow contract encoded in tool descriptions, nudging the LLM at the point of tool use
-- **Dependency management** — bidirectional `dependents`/`dependsOn` relationships with warnings for cycles, self-deps, and dangling references
-- **Shared task lists** — multiple pi sessions can share a file-backed task list for agent team coordination
-- **File locking** — concurrent access is safe when multiple sessions share a task list
-- **Background process tracking** — track spawned processes with output buffering, blocking wait, and graceful stop
-- **Subagent integration** — tasks with `agentType` can be executed as subagents via `TaskExecute` (requires [@tintinweb/pi-subagents](https://github.com/tintinweb/pi-subagents)). Auto-cascade mode flows through the task DAG automatically when enabled.
+- **4 LLM-callable tools** — `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`
+- **Persistent widget** — live task list above the editor with status icons and active task elapsed time/token counts
+- **System-reminder injection** — periodic task-tool nudges when useful
+- **Dependency management** — bidirectional `dependents`/`dependsOn` relationships with warnings
+- **Session or project storage** — per-session state by default, optional shared project file
+- **File locking** — safe concurrent access for shared project task lists
 
 ## Install
 
@@ -28,7 +21,7 @@ https://github.com/user-attachments/assets/1d0ee87a-e0a5-4bfa-a9b9-2f9144cb905b
 pi install npm:@tintinweb/pi-tasks
 ```
 
-Or load directly for development:
+Development:
 
 ```bash
 pi -e ./src/index.ts
@@ -36,12 +29,10 @@ pi -e ./src/index.ts
 
 ## Widget
 
-The extension renders a persistent widget above the editor:
-
 ```
 ● 6 tasks (1 done, 1 in progress, 1 blocked, 1 stopped, 1 failed, 1 pending)
   ✓ #1 Design the flux capacitor
-  ▸ #2 Acquiring plutonium… (2m 49s · ↑ 4.1k ↓ 1.2k)
+  ▸ #2 Acquire plutonium… (2m 49s · ↑ 4.1k ↓ 1.2k)
   ○ #3 Install flux capacitor in DeLorean › depends on #2
   ⊘ #4 Waiting for plutonium permit
   ■ #5 Test time travel at 88 mph
@@ -51,63 +42,52 @@ The extension renders a persistent widget above the editor:
 | Icon | Meaning |
 |------|---------|
 | `○` | Pending |
-| `▶` | In-progress |
+| `▶` | In progress |
 | `▹`/`▸`/`▶` | Active in-progress animation |
-| `■` | Stopped by user/cancelled |
-| `✓` | Completed (strikethrough + dim) |
+| `■` | Stopped |
+| `✓` | Completed |
 | `✗` | Failed |
-| `⊘` | Blocked waiting on user action |
+| `⊘` | Blocked |
 
 ## Tools
 
 ### `TaskCreate`
 
-Create a structured task. Used proactively for complex multi-step work.
+Create tasks.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `tasks` | array | yes | Tasks to create |
 | `tasks[].subject` | string | yes | Brief imperative title |
 | `tasks[].description` | string | yes | Detailed context and acceptance criteria |
-| `tasks[].agentType` | string | no | Agent type for subagent execution (e.g., `"general-purpose"`, `"Explore"`) |
-| `tasks[].metadata` | object | no | Arbitrary key-value pairs |
-
-```
-→ Created 2 tasks:
-#1 Fix authentication bug
-#2 Write unit tests
-```
 
 ### `TaskList`
 
-List all tasks with status, owner, and dependency info.
+List tasks with status, owner, and dependency info.
 
-```
+```text
 #1 [pending] Fix authentication bug
-#2 [in_progress] Write unit tests (agent-1)
+#2 [in_progress] Write unit tests
 #3 [pending] Update docs [depends on #1, #2]
 ```
 
-Sort order: pending, in-progress, blocked, stopped, failed, completed (each group by ID).
+Sort order: pending, in-progress, blocked, stopped, failed, completed. Each group is sorted by ID.
 
 ### `TaskGet`
 
-Get full details for a specific task.
+Get full details for one task.
 
-```
+```text
 Task #2: Write unit tests
 Status: in_progress
-Owner: agent-1
 Description: Add tests for the auth module
 Depends on: #1
 Dependents: #3
 ```
 
-Shows owner (if set) and open (non-completed) dependency edges. Non-empty metadata is displayed as JSON.
-
 ### `TaskUpdate`
 
-Update task fields, status, metadata, and dependencies.
+Update task fields, status, owner, and dependencies.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -115,221 +95,78 @@ Update task fields, status, metadata, and dependencies.
 | `status` | `pending` / `in_progress` / `blocked` / `stopped` / `failed` / `completed` / `deleted` | New status |
 | `subject` | string | New title |
 | `description` | string | New description |
-| `owner` | string | Agent name |
-| `metadata` | object | Shallow merge (null values delete keys) |
+| `owner` | string | Owner name |
 | `addDependents` | string[] | Task IDs that depend on this task |
 | `addDependsOn` | string[] | Task IDs this task depends on |
-
-```
-→ Updated task #1 status
-→ Updated task #2 owner, status
-→ Updated task #3 dependents
-→ Updated task #3 dependents (warning: cycle: #3 and #1 depend on each other)
-→ Updated task #1 deleted
-```
 
 Setting `status: "deleted"` permanently removes the task.
 
 Dependencies are bidirectional: `addDependents: ["3"]` on task 1 also adds `dependsOn: ["1"]` to task 3.
 
-### `TaskOutput`
-
-Retrieve output from a background task process.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `task_id` | string | — | Task ID or agent ID (required) |
-| `block` | boolean | `true` | Wait for completion |
-| `timeout` | number | `30000` | Max wait time in ms (max 600000) |
-
-Both task IDs and agent IDs (including partial prefixes) are accepted — agent IDs are resolved via the internal `agentTaskMap`.
-
-### `TaskStop`
-
-Stop a running background task process. Sends SIGTERM, waits 5 seconds, then SIGKILL. For subagent tasks, sends a stop RPC.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `task_id` | string | Task ID or agent ID to stop |
-
-### `TaskExecute`
-
-Execute one or more tasks as background subagents. Requires [@tintinweb/pi-subagents](https://github.com/tintinweb/pi-subagents).
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `task_ids` | string[] | Task IDs to execute (required) |
-| `additional_context` | string | Extra context appended to each agent's prompt |
-| `model` | string | Model override (e.g., `"sonnet"`, `"haiku"`) |
-| `max_turns` | number | Max turns per agent |
-
-Tasks must be `pending`, have `agentType` set, and all `dependsOn` dependencies `completed`. Each task spawns as an independent background subagent.
-
-With **auto-cascade** enabled (via `/tasks` → Settings), completed tasks automatically trigger execution of their eligible dependents — flowing through the DAG like a build system. Each cascaded agent receives its prerequisites' stored results in the prompt, so it can build directly on what came before without re-fetching.
-
 ## Task Lifecycle
 
-```
+```text
 pending → in_progress → completed
                       → stopped
                       → failed
-pending → blocked (waiting on user) → pending/in_progress
-any state → deleted (permanently removed)
+pending → blocked → pending/in_progress
+any state → deleted
 ```
 
-Tasks are created as `pending`. Mark `in_progress` before starting work, `blocked` when waiting on user action/input/permission, `stopped` when intentionally interrupted, `failed` when the assistant cannot recover, and `completed` only when fully done. `deleted` removes entirely — IDs never reset.
+## Storage
 
-## Dependency Management
-
-- **Bidirectional edges:** `addDependents`/`addDependsOn` maintain both sides automatically
-- **Dependency warnings:** cycles, self-dependencies, and references to non-existent tasks are stored but produce warnings in the tool response
-- **Display-time filtering:** `TaskList` only shows non-completed dependencies in `[depends on ...]`
-- **Stored edges preserved:** completed dependency edges remain in storage even when hidden from `TaskList`
-- **Cleanup on deletion:** removing a task cleans up all edges pointing to it
-
-## Task Storage
-
-Task storage is controlled by the `taskScope` setting (`/tasks` → Settings → Task storage):
+Task storage is controlled by `/tasks` → Settings → Task storage:
 
 | Mode | File | Behaviour |
 |------|------|-----------|
-| `memory` | *(none)* | In-memory only — tasks lost when session ends |
-| `session` **(default)** | Pi session custom entries (`~/.pi/agent/sessions/...`) | Per-session state — isolated between sessions, branch-aware, survives resume, does not create project `.pi` |
-| `project` | `<cwd>/.pi/tasks/tasks.json` | Shared across all sessions in the project |
+| `memory` | none | In-memory only |
+| `session` default | Pi session custom entries | Per-session, branch-aware, survives resume |
+| `project` | `<cwd>/.pi/tasks/tasks.json` | Shared across sessions in the project |
 
-On new session start, if all persisted tasks are completed they are auto-cleared for a clean slate. On session resume, all tasks (including completed) are shown so the user can review progress. Session-scoped tasks are stored as append-only extension state in Pi's existing session JSONL and are not sent to the LLM.
+Completed tasks can auto-clear via `/tasks` → Settings → Auto-clear completed tasks.
 
-### Auto-clear completed tasks
+Settings are saved to `<cwd>/.pi/tasks-config.json` only when changed.
 
-The `autoClearCompleted` setting controls automatic cleanup of completed tasks:
-
-| Mode | Behaviour |
-|------|-----------|
-| `never` | Completed tasks stay visible until manually cleared via `/tasks` → Clear completed |
-| `on_list_complete` **(default)** | Cleared after all tasks are done and a few idle turns pass |
-| `on_task_complete` | Each completed task cleared individually after a few turns |
-
-Both auto-clear modes use a turn-based delay for non-jarring UX — tasks linger briefly so you see the completion before they disappear.
-
-Settings (`taskScope`, `autoCascade`, `autoClearCompleted`) are saved to `<cwd>/.pi/tasks-config.json` only when changed via `/tasks` → Settings.
-
-### Override via environment variables
+## Environment
 
 | Variable | Value | Behaviour |
 |----------|-------|-----------|
-| `PI_TASKS` | `off` | In-memory only (CI/automation) |
+| `PI_TASKS` | `off` | In-memory only |
 | `PI_TASKS` | `sprint-1` | Named shared list at `~/.pi/tasks/sprint-1.json` |
-| `PI_TASKS` | `/abs/path/tasks.json` | Explicit absolute file path |
+| `PI_TASKS` | `/abs/path/tasks.json` | Explicit file path |
 | `PI_TASKS` | `./tasks.json` | Relative path resolved from cwd |
-| *(unset)* | | Uses `taskScope` setting (default: session entries) |
-| `PI_TASKS_DEBUG` | `1` | Trace RPC communication (request/reply/timeout) and spawn errors to stderr |
-
-Named and explicit paths use a file-locked store with stale-lock detection — safe for multiple pi sessions coordinating on the same task list.
-
-**CI example** (`.envrc`):
-```bash
-export PI_TASKS=off
-```
-
-**Shared team list** (`.envrc`):
-```bash
-export PI_TASKS=my-project
-```
+| unset | | Uses taskScope setting |
 
 ## `/tasks` Command
 
-Interactive menu:
+Interactive task menu:
 
-```
-Tasks
-├─ View all tasks (4)
-├─ Create task
-├─ Clear completed (1)
-├─ Clear all (4)
-└─ Settings
-```
-
-- **View all tasks** — select a task to see details and take actions (start, complete, delete)
-- **Create task** — input prompts for subject and description
-- **Clear completed** — remove all completed tasks
-- **Clear all** — remove all tasks regardless of status
-- **Settings** — configure task storage, auto-cascade, and auto-clear completed tasks (writes `tasks-config.json` only when changed)
-
-## Cross-extension Communication with [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents)
-
-[`pi-tasks`](https://github.com/tintinweb/pi-tasks) communicates with [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) via pi's eventbus using a scoped request/reply RPC protocol. No shared global state — just events.
-
-### Presence Detection
-
-Load order doesn't matter. Two handshake paths ensure detection regardless of which extension loads first:
-
-1. **Ping on init** — [`pi-tasks`](https://github.com/tintinweb/pi-tasks) emits `subagents:rpc:ping` with a unique `requestId` and listens for `subagents:rpc:ping:reply:{requestId}`. If [`pi-subagents`](https://github.com/tintinweb/pi-subagents) is already loaded, it replies immediately.
-2. **Ready broadcast** — [`pi-subagents`](https://github.com/tintinweb/pi-subagents) emits `subagents:ready` when it initializes. If [`pi-tasks`](https://github.com/tintinweb/pi-tasks) loaded first, it picks this up.
-
-```
-┌─────────────┐                    ┌──────────────────┐
-│  pi-tasks   │                    │  pi-subagents    │
-└──────┬──────┘                    └────────┬─────────┘
-       │                                    │
-       │──── subagents:rpc:ping ───────────▶│
-       │◀─── subagents:rpc:ping:reply ──────│
-       │                                    │
-       │◀─── subagents:ready ───────────────│  (broadcast on init)
-       │                                    │
-```
-
-### Spawning Subagents
-
-When `TaskExecute` runs, it sends a spawn RPC with a scoped reply channel:
-
-```
-pi-tasks                                pi-subagents
-   │                                         │
-   │── subagents:rpc:spawn ─────────────────▶│  { requestId, type, prompt, options }
-   │◀─ subagents:rpc:spawn:reply:{reqId} ───│  { id }  (or { error })
-   │                                         │
-```
-
-The returned `id` is stored in an in-memory `agentTaskMap` (agentId → taskId) for O(1) completion lookup. A 30-second timeout rejects the Promise if no reply arrives.
-
-### Lifecycle Events
-
-[`pi-subagents`](https://github.com/tintinweb/pi-subagents) emits lifecycle events that [`pi-tasks`](https://github.com/tintinweb/pi-tasks) listens to:
-
-| Event | Payload | Action |
-|-------|---------|--------|
-| `subagents:completed` | `{ id, result? }` | Mark task `completed`, trigger auto-cascade if enabled |
-| `subagents:failed` | `{ id, error?, status }` | Revert task to `pending`, store error in metadata |
-
-### Standalone Mode
-
-If [`pi-subagents`](https://github.com/tintinweb/pi-subagents) is not installed, everything works except `TaskExecute`, which returns a friendly error message. All core task tools (create, list, get, update, dependencies, widget, system-reminder injection) function independently.
+- View all tasks
+- Create task
+- Clear completed
+- Clear all
+- Settings
 
 ## Architecture
 
-```
+```text
 src/
-├── index.ts            # Extension entry: 7 tools + /tasks command + widget + subagent integration
-├── types.ts            # Task, TaskStatus, BackgroundProcess types
-├── task-store.ts       # Task store with CRUD, dependencies, snapshots, optional file locking
-├── auto-clear.ts       # Turn-based auto-clearing of completed tasks (AutoClearManager)
-├── tasks-config.ts     # Config persistence (taskScope, autoCascade, autoClearCompleted) → .pi/tasks-config.json when settings are changed
-├── process-tracker.ts  # Background process output buffering and stop
+├── index.ts              # Extension entry: tools, command, widget
+├── types.ts              # Task types
+├── task-store.ts         # CRUD, dependencies, snapshots, file locking
+├── auto-clear.ts         # Turn-based completed-task cleanup
+├── tasks-config.ts       # taskScope and autoClearCompleted config
 └── ui/
-    ├── task-widget.ts  # Persistent widget with status icons and active-task stats
-    └── settings-menu.ts  # /tasks → Settings panel (SettingsList TUI component)
+    ├── task-widget.ts
+    └── settings-menu.ts
 ```
-
-## Future Work
-
-- **Background Bash auto-task creation** — Claude Code auto-creates tasks when `Bash` runs with `run_in_background: true`. Pi's bash tool currently lacks a `run_in_background` parameter (only `command` + `timeout`), so there's nothing to hook into. Once pi adds background execution support to its bash tool, we can use the `tool_call` event to detect it and auto-create tasks via `TaskStore`/`ProcessTracker`.
 
 ## Development
 
 ```bash
 npm install
-npm run typecheck   # TypeScript validation
-npm test            # Run unit tests (153 tests)
+npm run typecheck
+npm test
 ```
 
 ## License

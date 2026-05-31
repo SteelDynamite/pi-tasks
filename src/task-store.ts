@@ -13,7 +13,6 @@ import type { Task, TaskCreateFields, TaskStatus, TaskStoreData } from "./types.
 function cloneTask(task: Task): Task {
   return {
     ...task,
-    metadata: { ...task.metadata },
     dependents: [...task.dependents],
     dependsOn: [...task.dependsOn],
   };
@@ -102,7 +101,6 @@ export class TaskStore {
         description: task.description ?? "",
         status: task.status ?? "pending",
         owner: task.owner,
-        metadata: { ...(task.metadata ?? {}) },
         dependents: Array.isArray(task.dependents) ? [...task.dependents] : Array.isArray(task.blocks) ? [...task.blocks] : [],
         dependsOn: Array.isArray(task.dependsOn) ? [...task.dependsOn] : Array.isArray(task.blockedBy) ? [...task.blockedBy] : [],
         createdAt: task.createdAt ?? Date.now(),
@@ -159,7 +157,6 @@ export class TaskStore {
       description: fields.description,
       status: "pending",
       owner: undefined,
-      metadata: fields.metadata ?? {},
       dependents: [],
       dependsOn: [],
       createdAt: now,
@@ -169,8 +166,8 @@ export class TaskStore {
     return task;
   }
 
-  create(subject: string, description: string, metadata?: Record<string, any>): Task {
-    return this.createMany([{ subject, description, metadata }])[0];
+  create(subject: string, description: string): Task {
+    return this.createMany([{ subject, description }])[0];
   }
 
   createMany(tasks: TaskCreateFields[]): Task[] {
@@ -193,7 +190,6 @@ export class TaskStore {
     subject?: string;
     description?: string;
     owner?: string;
-    metadata?: Record<string, any>;
     addDependents?: string[];
     addDependsOn?: string[];
     /** Deprecated aliases accepted for old callers. */
@@ -235,17 +231,6 @@ export class TaskStore {
         changedFields.push("owner");
       }
 
-      // Metadata: shallow merge, null deletes keys
-      if (fields.metadata !== undefined) {
-        for (const [key, value] of Object.entries(fields.metadata)) {
-          if (value === null) {
-            delete task.metadata[key];
-          } else {
-            task.metadata[key] = value;
-          }
-        }
-        changedFields.push("metadata");
-      }
 
       // Bidirectional dependency edges
       const addDependents = [...(fields.addDependents ?? []), ...(fields.addBlocks ?? [])];

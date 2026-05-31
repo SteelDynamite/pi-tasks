@@ -22,24 +22,18 @@ describe("TaskStore (in-memory)", () => {
     expect(t1.description).toBe("Description 1");
   });
 
-  it("creates tasks with optional fields", () => {
-    const t = store.create("Task", "Desc", { key: "value" });
-
-    expect(t.metadata).toEqual({ key: "value" });
-  });
 
   it("creates many tasks with sequential IDs", () => {
     const tasks = store.createMany([
       { subject: "First", description: "Desc 1" },
-      { subject: "Second", description: "Desc 2", metadata: { key: "value" } },
+      { subject: "Second", description: "Desc 2" },
     ]);
 
     expect(tasks.map(task => task.id)).toEqual(["1", "2"]);
-    expect(tasks[1].metadata).toEqual({ key: "value" });
   });
 
   it("exports and restores snapshots", () => {
-    store.create("Task", "Desc", { key: "value" });
+    store.create("Task", "Desc");
     store.update("1", { status: "in_progress" });
 
     const restored = new TaskStore();
@@ -127,13 +121,6 @@ describe("TaskStore (in-memory)", () => {
     expect(t3.id).toBe("3"); // Not "1" — counter continues
   });
 
-  it("merges metadata with null key deletion", () => {
-    store.create("Test", "Desc", { a: 1, b: 2, c: 3 });
-    store.update("1", { metadata: { b: null, d: 4 } });
-
-    const task = store.get("1")!;
-    expect(task.metadata).toEqual({ a: 1, c: 3, d: 4 });
-  });
 
   it("sets up bidirectional dependents via addDependents", () => {
     store.create("Blocker", "Desc");
@@ -206,13 +193,6 @@ describe("TaskStore (in-memory)", () => {
     expect(store.list()).toHaveLength(0);
   });
 
-  it("creates tasks with metadata via TaskCreate", () => {
-    const t = store.create("With meta", "Desc", { pr: "123", reviewer: "alice" });
-    expect(t.metadata).toEqual({ pr: "123", reviewer: "alice" });
-
-    const retrieved = store.get("1")!;
-    expect(retrieved.metadata).toEqual({ pr: "123", reviewer: "alice" });
-  });
 
   it("allows circular dependencies with warning", () => {
     store.create("A", "Desc");

@@ -37,7 +37,6 @@ Use this tool to update a task in the task list.
 - **subject**: Change the task title (imperative form, e.g., "Run tests")
 - **description**: Change the task description
 - **owner**: Change the task owner (agent name)
-- **metadata**: Merge metadata keys into the task (set a key to null to delete it)
 - **addDependents**: Mark tasks that depend on this one
 - **addDependsOn**: Mark task dependencies that must complete first
 

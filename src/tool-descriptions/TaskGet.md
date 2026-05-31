@@ -1,4 +1,4 @@
-Use this tool to retrieve a task by its ID from the task list.
+Retrieve a task by its ID from the task list.
 
 ## When to Use This Tool
 
@@ -8,7 +8,6 @@ Use this tool to retrieve a task by its ID from the task list.
 
 ## Output
 
-Returns full task details:
 - **subject**: Task title
 - **description**: Detailed requirements and context
 - **status**: 'pending', 'in_progress', 'blocked', 'stopped', 'failed', or 'completed'

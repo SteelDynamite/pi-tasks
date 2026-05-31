@@ -193,8 +193,6 @@ export class TaskWidget {
 
       let text: string;
       if (isActive) {
-        const agentId = task.metadata?.agentId;
-        const agentLabel = agentId ? ` (agent ${agentId.slice(0, 5)})` : "";
         const m = this.metrics.get(task.id);
         let stats = "";
         if (m) {
@@ -206,22 +204,19 @@ export class TaskWidget {
             ? ` ${theme.fg("dim", `(${elapsed} · ${tokenParts.join(" ")})`)}`
             : ` ${theme.fg("dim", `(${elapsed})`)}`;
         }
-        text = `  ${icon} ${theme.fg("dim", "#" + task.id)} ${theme.fg("accent", task.subject + agentLabel + "…")}${stats}`;
+        text = `  ${icon} ${theme.fg("dim", "#" + task.id)} ${theme.fg("accent", task.subject + "…")}${stats}`;
       } else if (task.status === "completed") {
         text = `  ${icon} ${theme.fg("dim", theme.strikethrough("#" + task.id + " " + task.subject))}`;
       } else {
-        const agentSuffix = task.status === "in_progress" && task.metadata?.agentId
-          ? theme.fg("dim", ` (agent ${task.metadata.agentId.slice(0, 5)})`)
-          : "";
         const label = `#${task.id} ${task.subject}`;
         if (task.status === "failed") {
-          text = `  ${icon} ${theme.fg("error", label)}${agentSuffix}`;
+          text = `  ${icon} ${theme.fg("error", label)}`;
         } else if (task.status === "blocked") {
-          text = `  ${icon} ${theme.fg("warning", label)}${agentSuffix}`;
+          text = `  ${icon} ${theme.fg("warning", label)}`;
         } else if (task.status === "stopped") {
-          text = `  ${icon} ${theme.fg("accent", label)}${agentSuffix}`;
+          text = `  ${icon} ${theme.fg("accent", label)}`;
         } else {
-          text = `  ${icon} ${theme.fg("dim", "#" + task.id)} ${task.subject}${agentSuffix}`;
+          text = `  ${icon} ${theme.fg("dim", "#" + task.id)} ${task.subject}`;
         }
       }
 

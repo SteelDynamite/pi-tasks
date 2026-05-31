@@ -124,7 +124,6 @@ describe("session-entry task persistence", () => {
           subject: "Restored task",
           description: "From session entry",
           status: "pending",
-          metadata: {},
           dependents: [],
           dependsOn: [],
           createdAt: Date.now(),
@@ -159,34 +158,4 @@ describe("session-entry task persistence", () => {
     expect(mock.pi.appendEntry).not.toHaveBeenCalledWith("pi-tasks", expect.anything());
   });
 
-  it("rehydrates subagent mappings from restored task metadata", async () => {
-    const { default: initExtension } = await import("../src/index.js");
-    const entries: MockEntry[] = [{
-      type: "custom",
-      customType: "pi-tasks",
-      data: {
-        version: 1,
-        nextId: 2,
-        tasks: [{
-          id: "1",
-          subject: "Agent task",
-          description: "Complete via subagent",
-          status: "in_progress",
-          metadata: { agentId: "agent-1", agentType: "general-purpose" },
-          dependents: [],
-          dependsOn: [],
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        }],
-      },
-    }];
-    const mock = mockPi(entries);
-    initExtension(mock.pi as any);
-
-    await mock.fireLifecycle("session_start", { reason: "resume" });
-    mock.emitEvent("subagents:completed", { id: "agent-1", result: "done" });
-    const result = await mock.executeTool("TaskList", {});
-
-    expect(result.content[0].text).toContain("#1 [completed] Agent task");
-  });
 });

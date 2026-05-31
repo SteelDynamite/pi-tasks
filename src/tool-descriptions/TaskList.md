@@ -1,4 +1,4 @@
-Use this tool to list all tasks in the task list.
+List all tasks in the task list.
 
 ## When to Use This Tool
 
