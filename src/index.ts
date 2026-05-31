@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, formatSize, truncateHead, truncateTail } from "@earendil-works/pi-coding-agent";
@@ -49,6 +49,19 @@ function truncateForTool(msg: string, mode: TruncateMode = "head"): string {
 function textResult(msg: string, mode: TruncateMode = "head") {
   return { content: [{ type: "text" as const, text: truncateForTool(msg, mode) }], details: undefined as any };
 }
+
+const TOOL_DESCRIPTION_NAMES = ["TaskCreate", "TaskList", "TaskGet", "TaskUpdate", "TaskOutput", "TaskStop", "TaskExecute"] as const;
+type ToolDescriptionName = (typeof TOOL_DESCRIPTION_NAMES)[number];
+
+function loadToolDescription(name: ToolDescriptionName): string {
+  const localUrl = new URL(`./tool-descriptions/${name}.md`, import.meta.url);
+  const sourceUrl = new URL(`../src/tool-descriptions/${name}.md`, import.meta.url);
+  return readFileSync(existsSync(localUrl) ? localUrl : sourceUrl, "utf8").trimEnd();
+}
+
+const toolDescriptions = Object.fromEntries(
+  TOOL_DESCRIPTION_NAMES.map(name => [name, loadToolDescription(name)]),
+) as Record<ToolDescriptionName, string>;
 
 /** Task tool names — used to detect task tool usage for reminder suppression. */
 const TASK_TOOL_NAMES = new Set(["TaskCreate", "TaskList", "TaskGet", "TaskUpdate", "TaskOutput", "TaskStop", "TaskExecute"]);
@@ -573,50 +586,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "TaskCreate",
     label: "TaskCreate",
-    description: `Use this tool to create a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
-It also helps the user understand the progress of the task and overall progress of their requests.
-
-## When to Use This Tool
-
-Use this tool proactively in these scenarios:
-
-- Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
-- Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
-- Plan mode - When using plan mode, create a task list to track the work
-- User explicitly requests todo list - When the user directly asks you to use the todo list
-- User provides multiple tasks - When users provide a list of things to be done (numbered or comma-separated)
-- After receiving new instructions - Immediately capture user requirements as tasks
-- When you start working on a task - Mark it as in_progress BEFORE beginning work
-- After completing a task - Mark it as completed and add any new follow-up tasks discovered during implementation
-
-## When NOT to Use This Tool
-
-Skip using this tool when:
-- There is only a single, straightforward task
-- The task is trivial and tracking it provides no organizational benefit
-- The task can be completed in less than 3 trivial steps
-- The task is purely conversational or informational
-
-NOTE that you should not use this tool if there is only one trivial task to do. In this case you are better off just doing the task directly.
-
-## Task Fields
-
-- **tasks**: Array of tasks to create. Must contain at least one task.
-- **tasks[].subject**: A brief, actionable title in imperative form (e.g., "Fix authentication bug in login flow")
-- **tasks[].description**: Detailed description of what needs to be done, including context and acceptance criteria
-- **tasks[].activeForm** (optional): Present continuous form shown while the task is in_progress (e.g., "Fixing authentication bug"). If omitted, the subject is shown.
-- **tasks[].agentType** (optional): Agent type for subagent execution via TaskExecute.
-- **tasks[].metadata** (optional): Arbitrary metadata to attach to the task.
-
-All tasks are created with status \`pending\`.
-
-## Tips
-
-- Create tasks with clear, specific subjects that describe the outcome
-- Include enough detail in the description for another agent to understand and complete the task
-- After creating tasks, use TaskUpdate to set up dependencies (dependents/dependsOn) if needed
-- Check TaskList first to avoid creating duplicate tasks
-- Include \`agentType\` (e.g., "general-purpose", "Explore") to mark tasks for subagent execution via TaskExecute`,
+    description: toolDescriptions.TaskCreate,
     promptGuidelines: [
       "When working on complex multi-step tasks, use TaskCreate to track progress and TaskUpdate to update status.",
       "Mark tasks as in_progress before starting work and completed when done.",
@@ -626,7 +596,6 @@ All tasks are created with status \`pending\`.
       tasks: Type.Array(Type.Object({
         subject: Type.String({ description: "A brief title for the task" }),
         description: Type.String({ description: "A detailed description of what needs to be done" }),
-        activeForm: Type.Optional(Type.String({ description: "Present continuous form shown while in_progress (e.g., 'Running tests')" })),
         agentType: Type.Optional(Type.String({ description: "Agent type for subagent execution (e.g., 'general-purpose', 'Explore'). Tasks with agentType can be started via TaskExecute." })),
         metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
       }), { description: "Tasks to create", minItems: 1 }),
@@ -643,7 +612,6 @@ All tasks are created with status \`pending\`.
         return {
           subject: item.subject,
           description: item.description,
-          activeForm: item.activeForm,
           metadata: Object.keys(meta).length > 0 ? meta : undefined,
         };
       }));
@@ -660,26 +628,7 @@ All tasks are created with status \`pending\`.
   pi.registerTool({
     name: "TaskList",
     label: "TaskList",
-    description: `Use this tool to list all tasks in the task list.
-
-## When to Use This Tool
-
-- To see what tasks are available to work on (status: 'pending', no owner, dependencies complete)
-- To check overall progress on the project
-- To find tasks that are blocked waiting on user action
-- After completing a task, to check for newly eligible work or claim the next available task
-- **Prefer working on tasks in ID order** (lowest ID first) when multiple tasks are available, as earlier tasks often set up context for later ones
-
-## Output
-
-Returns a summary of each task:
-- **id**: Task identifier (use with TaskGet, TaskUpdate)
-- **subject**: Brief description of the task
-- **status**: 'pending', 'in_progress', 'blocked', 'stopped', 'failed', or 'completed'
-- **owner**: Agent ID if assigned, empty if available
-- **dependsOn**: List of dependency task IDs that must complete first
-
-Use TaskGet with a specific task ID to view full details including description and comments.`,
+    description: toolDescriptions.TaskList,
     parameters: Type.Object({}),
 
     execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
@@ -726,27 +675,7 @@ Use TaskGet with a specific task ID to view full details including description a
   pi.registerTool({
     name: "TaskGet",
     label: "TaskGet",
-    description: `Use this tool to retrieve a task by its ID from the task list.
-
-## When to Use This Tool
-
-- When you need the full description and context before starting work on a task
-- To understand task dependencies (what it depends on and what depends on it)
-- After being assigned a task, to get complete requirements
-
-## Output
-
-Returns full task details:
-- **subject**: Task title
-- **description**: Detailed requirements and context
-- **status**: 'pending', 'in_progress', 'blocked', 'stopped', 'failed', or 'completed'
-- **dependents**: Tasks waiting on this one to complete
-- **dependsOn**: Tasks that must complete before this one can start
-
-## Tips
-
-- After fetching a task, verify its dependsOn dependencies are complete before beginning work.
-- Use TaskList to see all tasks in summary form.`,
+    description: toolDescriptions.TaskGet,
     parameters: Type.Object({
       taskId: Type.String({ description: "The ID of the task to retrieve" }),
     }),
@@ -797,93 +726,7 @@ Returns full task details:
   pi.registerTool({
     name: "TaskUpdate",
     label: "TaskUpdate",
-    description: `Use this tool to update a task in the task list.
-
-## When to Use This Tool
-
-**Before starting work on a task:**
-- Mark it in_progress BEFORE beginning — do not start work without updating status first
-- After resolving, call TaskList to find your next task
-
-**Mark tasks as resolved:**
-- When you have completed the work described in a task
-- When a task is no longer needed or has been superseded
-- IMPORTANT: Always mark your assigned tasks as resolved when you finish them
-- After resolving, call TaskList to find your next task
-
-- ONLY mark a task as completed when you have FULLY accomplished it
-- If blocked waiting on the user, set status to blocked and explain what user action is needed
-- If intentionally stopped/cancelled, set status to stopped
-- If fundamentally failed and the assistant cannot recover, set status to failed
-- If waiting on another task, use addDependsOn and keep status pending
-- Never mark a task as completed if:
-  - Tests are failing
-  - Implementation is partial
-  - You encountered unresolved errors
-  - You couldn't find necessary files or dependencies
-
-**Delete tasks:**
-- When a task is no longer relevant or was created in error
-- Setting status to \`deleted\` permanently removes the task
-
-**Update task details:**
-- When requirements change or become clearer
-- When establishing dependencies between tasks
-
-## Fields You Can Update
-
-- **status**: The task status (see Status Workflow below)
-- **subject**: Change the task title (imperative form, e.g., "Run tests")
-- **description**: Change the task description
-- **activeForm**: Present continuous form shown while in_progress (e.g., "Running tests")
-- **owner**: Change the task owner (agent name)
-- **metadata**: Merge metadata keys into the task (set a key to null to delete it)
-- **addDependents**: Mark tasks that depend on this one
-- **addDependsOn**: Mark task dependencies that must complete first
-
-## Status Workflow
-
-Statuses: \`pending\`, \`in_progress\`, \`blocked\`, \`stopped\`, \`failed\`, \`completed\`.
-
-- \`pending\`: queued/not started, including normal dependency waits
-- \`in_progress\`: actively being worked
-- \`blocked\`: waiting on user action/input/permission
-- \`stopped\`: intentionally interrupted/cancelled
-- \`failed\`: fundamentally failed; assistant cannot recover without a new plan or external fix
-- \`completed\`: fully done
-
-Use \`deleted\` to permanently remove a task.
-
-## Staleness
-
-Make sure to read a task's latest state using \`TaskGet\` before updating it.
-
-## Examples
-
-Mark task as in progress when starting work:
-\`\`\`json
-{"taskId": "1", "status": "in_progress"}
-\`\`\`
-
-Mark task as completed after finishing work:
-\`\`\`json
-{"taskId": "1", "status": "completed"}
-\`\`\`
-
-Delete a task:
-\`\`\`json
-{"taskId": "1", "status": "deleted"}
-\`\`\`
-
-Claim a task by setting owner:
-\`\`\`json
-{"taskId": "1", "owner": "my-name"}
-\`\`\`
-
-Set up task dependencies:
-\`\`\`json
-{"taskId": "2", "addDependsOn": ["1"]}
-\`\`\``,
+    description: toolDescriptions.TaskUpdate,
     parameters: Type.Object({
       taskId: Type.String({ description: "The ID of the task to update" }),
       status: Type.Optional(StringEnum(["pending", "in_progress", "blocked", "stopped", "failed", "completed", "deleted"] as const, {
@@ -891,7 +734,6 @@ Set up task dependencies:
       })),
       subject: Type.Optional(Type.String({ description: "New subject for the task" })),
       description: Type.Optional(Type.String({ description: "New description for the task" })),
-      activeForm: Type.Optional(Type.String({ description: "Present continuous form shown while in_progress" })),
       owner: Type.Optional(Type.String({ description: "New owner for the task" })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Metadata keys to merge into the task. Set a key to null to delete it." })),
       addDependents: Type.Optional(Type.Array(Type.String(), { description: "Task IDs that depend on this task" })),
@@ -934,13 +776,7 @@ Set up task dependencies:
   pi.registerTool({
     name: "TaskOutput",
     label: "TaskOutput",
-    description: `- Retrieves output from a running or completed task (background shell, agent, or remote session)
-- Takes a task_id parameter identifying the task
-- Returns the task output along with status information
-- Use block=true (default) to wait for task completion
-- Use block=false for non-blocking check of current status
-- Task IDs can be found using the /tasks command
-- Works with all task types: background shells, async agents, and remote sessions`,
+    description: toolDescriptions.TaskOutput,
     parameters: Type.Object({
       task_id: Type.String({ description: "The task ID to get output from" }),
       block: Type.Boolean({ description: "Whether to wait for completion", default: true }),
@@ -1012,11 +848,7 @@ Set up task dependencies:
   pi.registerTool({
     name: "TaskStop",
     label: "TaskStop",
-    description: `
-- Stops a running background task by its ID
-- Takes a task_id parameter identifying the task to stop
-- Returns a success or failure status
-- Use this tool when you need to terminate a long-running task`,
+    description: toolDescriptions.TaskStop,
     parameters: Type.Object({
       task_id: Type.Optional(Type.String({ description: "The ID of the background task to stop" })),
       shell_id: Type.Optional(Type.String({ description: "Deprecated: use task_id instead" })),
@@ -1059,20 +891,7 @@ Set up task dependencies:
   pi.registerTool({
     name: "TaskExecute",
     label: "TaskExecute",
-    description: `Execute one or more tasks as subagents.
-
-## When to Use This Tool
-
-- To start execution of tasks that have \`agentType\` set (created via TaskCreate with agentType parameter)
-- Tasks must be \`pending\` with all dependsOn dependencies \`completed\`
-- Each task runs as an independent background subagent
-
-## Parameters
-
-- **task_ids**: Array of task IDs to execute
-- **additional_context**: Extra context appended to each agent's prompt
-- **model**: Model override for agents (e.g., "sonnet", "haiku")
-- **max_turns**: Maximum turns per agent`,
+    description: toolDescriptions.TaskExecute,
     promptGuidelines: [
       "Never use the Agent tool for tasks launched via TaskExecute — agents are already running.",
     ],

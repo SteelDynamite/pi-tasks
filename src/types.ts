@@ -7,7 +7,6 @@ export type TaskStatus = "pending" | "in_progress" | "blocked" | "stopped" | "fa
 export interface TaskCreateFields {
   subject: string;
   description: string;
-  activeForm?: string;
   metadata?: Record<string, any>;
 }
 
@@ -16,7 +15,6 @@ export interface Task {
   subject: string;
   description: string;
   status: TaskStatus;
-  activeForm?: string;
   owner?: string;
   metadata: Record<string, any>;
   dependents: string[];

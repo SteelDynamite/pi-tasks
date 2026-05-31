@@ -101,7 +101,6 @@ export class TaskStore {
         subject: task.subject ?? "",
         description: task.description ?? "",
         status: task.status ?? "pending",
-        activeForm: task.activeForm,
         owner: task.owner,
         metadata: { ...(task.metadata ?? {}) },
         dependents: Array.isArray(task.dependents) ? [...task.dependents] : Array.isArray(task.blocks) ? [...task.blocks] : [],
@@ -159,7 +158,6 @@ export class TaskStore {
       subject: fields.subject,
       description: fields.description,
       status: "pending",
-      activeForm: fields.activeForm,
       owner: undefined,
       metadata: fields.metadata ?? {},
       dependents: [],
@@ -171,8 +169,8 @@ export class TaskStore {
     return task;
   }
 
-  create(subject: string, description: string, activeForm?: string, metadata?: Record<string, any>): Task {
-    return this.createMany([{ subject, description, activeForm, metadata }])[0];
+  create(subject: string, description: string, metadata?: Record<string, any>): Task {
+    return this.createMany([{ subject, description, metadata }])[0];
   }
 
   createMany(tasks: TaskCreateFields[]): Task[] {
@@ -194,7 +192,6 @@ export class TaskStore {
     status?: TaskStatus | "deleted";
     subject?: string;
     description?: string;
-    activeForm?: string;
     owner?: string;
     metadata?: Record<string, any>;
     addDependents?: string[];
@@ -232,10 +229,6 @@ export class TaskStore {
       if (fields.description !== undefined) {
         task.description = fields.description;
         changedFields.push("description");
-      }
-      if (fields.activeForm !== undefined) {
-        task.activeForm = fields.activeForm;
-        changedFields.push("activeForm");
       }
       if (fields.owner !== undefined) {
         task.owner = fields.owner;

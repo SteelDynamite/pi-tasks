@@ -923,17 +923,17 @@ describe("Widget agent ID display", () => {
   });
 
   it("shows agent ID for active agent-backed tasks", () => {
-    store.create("Agent task", "Desc", "Running tests", { agentType: "general-purpose", agentId: "abc1234567890" });
+    store.create("Agent task", "Desc", { agentType: "general-purpose", agentId: "abc1234567890" });
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
     const lines = renderWidget(ui.state);
     expect(lines[1]).toContain("agent abc12");
-    expect(lines[1]).toContain("Running tests");
+    expect(lines[1]).toContain("Agent task");
   });
 
   it("shows agent ID for non-active in_progress agent-backed tasks", () => {
-    store.create("Agent task", "Desc", undefined, { agentType: "general-purpose", agentId: "xyz9876543210" });
+    store.create("Agent task", "Desc", { agentType: "general-purpose", agentId: "xyz9876543210" });
     store.update("1", { status: "in_progress" });
     // NOT calling setActiveTask — simulates external agent management
     widget.update();
@@ -954,7 +954,7 @@ describe("Widget agent ID display", () => {
   });
 
   it("does not show agent ID for pending tasks", () => {
-    store.create("Pending agent task", "Desc", undefined, { agentType: "general-purpose", agentId: "abc12345" });
+    store.create("Pending agent task", "Desc", { agentType: "general-purpose", agentId: "abc12345" });
     widget.update();
 
     const lines = renderWidget(ui.state);
@@ -962,7 +962,7 @@ describe("Widget agent ID display", () => {
   });
 
   it("does not show agent ID for completed tasks", () => {
-    store.create("Done", "Desc", undefined, { agentType: "general-purpose", agentId: "abc12345" });
+    store.create("Done", "Desc", { agentType: "general-purpose", agentId: "abc12345" });
     store.update("1", { status: "completed" });
     widget.update();
 

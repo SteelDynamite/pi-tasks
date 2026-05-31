@@ -145,13 +145,13 @@ describe("TaskWidget", () => {
   });
 
   it("renders active tasks with play-shaped animation", () => {
-    store.create("Running thing", "Desc", "Processing data");
+    store.create("Running thing", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
     let lines = renderWidget(ui.state);
     expect(lines[1]).toContain("▸");
-    expect(lines[1]).toContain("Processing data…");
+    expect(lines[1]).toContain("Running thing…");
 
     vi.advanceTimersByTime(150);
     lines = renderWidget(ui.state);
@@ -219,7 +219,7 @@ describe("TaskWidget", () => {
   });
 
   it("tracks token usage for active tasks", () => {
-    store.create("Active task", "Desc", "Running");
+    store.create("Active task", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
@@ -227,24 +227,24 @@ describe("TaskWidget", () => {
     widget.addTokenUsage(500, 300);
 
     const lines = renderWidget(ui.state);
-    const activeLine = lines.find(l => l.includes("Running…"));
+    const activeLine = lines.find(l => l.includes("Active task…"));
     expect(activeLine).toContain("↑ 1.5k");
     expect(activeLine).toContain("↓ 800");
   });
 
   it("deactivates a task with setActiveTask(id, false)", () => {
-    store.create("Task", "Desc", "Doing work");
+    store.create("Task", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
     let lines = renderWidget(ui.state);
-    expect(lines[1]).toContain("Doing work…");
+    expect(lines[1]).toContain("Task…");
 
     widget.setActiveTask("1", false);
     lines = renderWidget(ui.state);
     // Should now show as regular in_progress (▶)
     expect(lines[1]).toContain("▶");
-    expect(lines[1]).not.toContain("Doing work…");
+    expect(lines[1]).not.toContain("Task…");
   });
 
   it("prunes stale active IDs on update", () => {
@@ -263,21 +263,21 @@ describe("TaskWidget", () => {
   });
 
   it("supports multiple active tasks simultaneously", () => {
-    store.create("Task A", "Desc", "Processing A");
-    store.create("Task B", "Desc", "Processing B");
+    store.create("Task A", "Desc");
+    store.create("Task B", "Desc");
     store.update("1", { status: "in_progress" });
     store.update("2", { status: "in_progress" });
     widget.setActiveTask("1", true);
     widget.setActiveTask("2", true);
 
     const lines = renderWidget(ui.state);
-    expect(lines[1]).toContain("Processing A…");
-    expect(lines[2]).toContain("Processing B…");
+    expect(lines[1]).toContain("Task A…");
+    expect(lines[2]).toContain("Task B…");
   });
 
   it("distributes token usage across all active tasks", () => {
-    store.create("Task A", "Desc", "A");
-    store.create("Task B", "Desc", "B");
+    store.create("Task A", "Desc");
+    store.create("Task B", "Desc");
     store.update("1", { status: "in_progress" });
     store.update("2", { status: "in_progress" });
     widget.setActiveTask("1", true);
@@ -300,7 +300,7 @@ describe("TaskWidget", () => {
     expect(ui.state.widgets.get("tasks")?.content).toBeUndefined();
   });
 
-  it("uses subject as fallback when no activeForm", () => {
+  it("uses subject for active task display", () => {
     store.create("My Subject", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
@@ -310,7 +310,7 @@ describe("TaskWidget", () => {
   });
 
   it("shows elapsed time but no token arrows when tokens are zero", () => {
-    store.create("No tokens", "Desc", "Working");
+    store.create("No tokens", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
@@ -319,14 +319,14 @@ describe("TaskWidget", () => {
     widget.update();
 
     const lines = renderWidget(ui.state);
-    const activeLine = lines.find(l => l.includes("Working…"));
+    const activeLine = lines.find(l => l.includes("No tokens…"));
     expect(activeLine).toContain("5s");
     expect(activeLine).not.toContain("↑");
     expect(activeLine).not.toContain("↓");
   });
 
   it("cleans up metrics when stale active IDs are pruned", () => {
-    store.create("Task", "Desc", "Running");
+    store.create("Task", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
     widget.addTokenUsage(100, 50);
@@ -336,7 +336,7 @@ describe("TaskWidget", () => {
     widget.update();
 
     // Reactivate with same ID (new task) — should get fresh metrics
-    store.create("Task 2", "Desc", "Running");  // ID 2
+    store.create("Task 2", "Desc");  // ID 2
     store.update("2", { status: "in_progress" });
     widget.setActiveTask("2", true);
 
@@ -382,7 +382,7 @@ describe("formatDuration (via widget rendering)", () => {
   });
 
   it("shows seconds for short durations", () => {
-    store.create("Quick", "Desc", "Working");
+    store.create("Quick", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
@@ -394,7 +394,7 @@ describe("formatDuration (via widget rendering)", () => {
   });
 
   it("shows hours for long durations", () => {
-    store.create("Long", "Desc", "Working");
+    store.create("Long", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
@@ -406,7 +406,7 @@ describe("formatDuration (via widget rendering)", () => {
   });
 
   it("shows exact hours without minutes", () => {
-    store.create("Exact", "Desc", "Working");
+    store.create("Exact", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
@@ -418,7 +418,7 @@ describe("formatDuration (via widget rendering)", () => {
   });
 
   it("shows minutes and seconds", () => {
-    store.create("Medium", "Desc", "Working");
+    store.create("Medium", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
@@ -430,7 +430,7 @@ describe("formatDuration (via widget rendering)", () => {
   });
 
   it("formats small token counts without k suffix", () => {
-    store.create("Small", "Desc", "Working");
+    store.create("Small", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 
@@ -443,7 +443,7 @@ describe("formatDuration (via widget rendering)", () => {
   });
 
   it("formats token counts with k suffix and removes .0", () => {
-    store.create("Large", "Desc", "Working");
+    store.create("Large", "Desc");
     store.update("1", { status: "in_progress" });
     widget.setActiveTask("1", true);
 

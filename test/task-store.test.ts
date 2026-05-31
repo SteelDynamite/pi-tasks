@@ -23,25 +23,23 @@ describe("TaskStore (in-memory)", () => {
   });
 
   it("creates tasks with optional fields", () => {
-    const t = store.create("Task", "Desc", "Running task", { key: "value" });
+    const t = store.create("Task", "Desc", { key: "value" });
 
-    expect(t.activeForm).toBe("Running task");
     expect(t.metadata).toEqual({ key: "value" });
   });
 
   it("creates many tasks with sequential IDs", () => {
     const tasks = store.createMany([
       { subject: "First", description: "Desc 1" },
-      { subject: "Second", description: "Desc 2", activeForm: "Doing second", metadata: { key: "value" } },
+      { subject: "Second", description: "Desc 2", metadata: { key: "value" } },
     ]);
 
     expect(tasks.map(task => task.id)).toEqual(["1", "2"]);
-    expect(tasks[1].activeForm).toBe("Doing second");
     expect(tasks[1].metadata).toEqual({ key: "value" });
   });
 
   it("exports and restores snapshots", () => {
-    store.create("Task", "Desc", "Running task", { key: "value" });
+    store.create("Task", "Desc", { key: "value" });
     store.update("1", { status: "in_progress" });
 
     const restored = new TaskStore();
@@ -130,7 +128,7 @@ describe("TaskStore (in-memory)", () => {
   });
 
   it("merges metadata with null key deletion", () => {
-    store.create("Test", "Desc", undefined, { a: 1, b: 2, c: 3 });
+    store.create("Test", "Desc", { a: 1, b: 2, c: 3 });
     store.update("1", { metadata: { b: null, d: 4 } });
 
     const task = store.get("1")!;
@@ -209,7 +207,7 @@ describe("TaskStore (in-memory)", () => {
   });
 
   it("creates tasks with metadata via TaskCreate", () => {
-    const t = store.create("With meta", "Desc", undefined, { pr: "123", reviewer: "alice" });
+    const t = store.create("With meta", "Desc", { pr: "123", reviewer: "alice" });
     expect(t.metadata).toEqual({ pr: "123", reviewer: "alice" });
 
     const retrieved = store.get("1")!;
@@ -253,12 +251,6 @@ describe("TaskStore (in-memory)", () => {
     expect(t.subject).toBe("   ");
   });
 
-  it("updates activeForm field", () => {
-    store.create("Test", "Desc");
-    const { changedFields } = store.update("1", { activeForm: "Running tests" });
-    expect(changedFields).toContain("activeForm");
-    expect(store.get("1")!.activeForm).toBe("Running tests");
-  });
 
   it("updates description field", () => {
     store.create("Test", "Original desc");

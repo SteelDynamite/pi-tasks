@@ -69,7 +69,6 @@ Create a structured task. Used proactively for complex multi-step work.
 | `tasks` | array | yes | Tasks to create |
 | `tasks[].subject` | string | yes | Brief imperative title |
 | `tasks[].description` | string | yes | Detailed context and acceptance criteria |
-| `tasks[].activeForm` | string | no | Present continuous form shown while in progress (e.g., "Running tests") |
 | `tasks[].agentType` | string | no | Agent type for subagent execution (e.g., `"general-purpose"`, `"Explore"`) |
 | `tasks[].metadata` | object | no | Arbitrary key-value pairs |
 
@@ -116,7 +115,6 @@ Update task fields, status, metadata, and dependencies.
 | `status` | `pending` / `in_progress` / `blocked` / `stopped` / `failed` / `completed` / `deleted` | New status |
 | `subject` | string | New title |
 | `description` | string | New description |
-| `activeForm` | string | In-progress display text |
 | `owner` | string | Agent name |
 | `metadata` | object | Shallow merge (null values delete keys) |
 | `addDependents` | string[] | Task IDs that depend on this task |
